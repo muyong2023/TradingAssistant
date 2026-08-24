@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="tiles">
+  <div class="tile">
+    <span class="tile-label">上涨 / 下跌</span>
+    <span class="tile-value"><b class="m-up">{{ advancing }}</b> <i>/</i> <b class="m-down">{{ declining }}</b></span>
+    <span class="tile-note">共 {{ digest.rows|length }} 只</span>
+  </div>
+  {% for b in digest.benchmarks %}
+  <div class="tile">
+    <span class="tile-label">{{ b.symbol }}</span>
+    <span class="tile-value {{ 'm-up' if b.change > 0 else ('m-down' if b.change < 0 else '') }}">
+      {{ '%+.2f'|format(b.change) }}%
+    </span>
+    <span class="tile-note">${{ '{:,.2f}'.format(b.price) }}</span>
+  </div>
+  {% endfor %}
+</section>
+
+{% if over or under %}
+<section class="card flags">
+  <h2>RSI 极值</h2>
+  <ul>
+    {% for r in under %}<li><span class="badge b-under">超卖</span>
+      <a href="/s/{{ r.symbol }}">{{ r.symbol }}</a> RSI {{ '%.0f'|format(r.snap.rsi) }} · {{ r.snap.trend() }}</li>{% endfor %}
+    {% for r in over %}<li><span class="badge b-over">超买</span>
+      <a href="/s/{{ r.symbol }}">{{ r.symbol }}</a> RSI {{ '%.0f'|format(r.snap.rsi) }} · {{ r.snap.trend() }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% for gname, rows in grouped.items() %}
+<section class="card">
+  <h2>{{ groups_meta[gname].label }}
+    <span class="h2-note">告警 ±{{ groups_meta[gname].alert.pct[0] }}% / ±{{ groups_meta[gname].alert.pct[1] }}%</span>
+  </h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th>标的</th><th class="num">现价</th><th class="num">涨跌</th>
+      <th>30 日走势</th><th>RSI</th>
+      <th class="num">vs MA20</th><th class="num">vs MA50</th><th class="num">vs MA200</th>
+      <th class="num">量比</th><th>趋势</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a class="sym" href="/s/{{ r.symbol }}">{{ r.symbol }}</a></td>
+        <td class="num">${{ '{:,.2f}'.format(r.price) }}</td>
+        <td class="num {{ 'm-up' if r.change > 0 else ('m-down' if r.change < 0 else '') }}">
+          {{ '%+.2f'|format(r.change) }}%
+        </td>
+        <td class="spark">{{ bars.get(r.symbol, [])|spark|safe }}</td>
+        <td>{{ (r.snap.rsi if r.snap else None)|meter|safe }}</td>
+        {% for p in [20, 50, 200] %}
+        <td class="num">
+          {% set g = r.snap.sma_gap_pct.get(p) if r.snap else None %}
+          {% if g is not none %}<span class="{{ 'm-up' if g > 0 else 'm-down' }}">{{ '%+.1f'|format(g) }}%</span>
+          {% else %}<span class="muted">-</span>{% endif %}
+        </td>
+        {% endfor %}
+        <td class="num">
+          {% if r.snap and r.snap.volume_ratio %}
+            {{ '%.2f'|format(r.snap.volume_ratio) }}x{% if r.snap.volume_ratio_projected %}<sup title="盘中按时段折算的全日预估">*</sup>{% endif %}
+          {% else %}<span class="muted">-</span>{% endif %}
+        </td>
+        <td class="trend">{{ r.snap.trend() if r.snap else '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endfor %}
+
+<p class="source-note">
+  报价源 {{ source }}{% if source != 'alpaca' %}（已降级，约 15 分钟延迟）{% endif %}
+  {% if market_open %} · 量比带 <sup>*</sup> 为盘中折算预估 · 每 60 秒自动刷新{% endif %}
+</p>
+{% endblock %}

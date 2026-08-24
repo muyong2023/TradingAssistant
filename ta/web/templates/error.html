@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card error-card">
+  <h1>数据获取失败</h1>
+  <p class="mono">{{ message }}</p>
+  <p>两个数据源都没能返回结果。稍后刷新，或检查网络与 API key。</p>
+</div>
+{% endblock %}

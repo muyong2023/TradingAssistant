@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}交易小助手{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📈</text></svg>">
+{% if market_open %}<meta http-equiv="refresh" content="60">{% endif %}
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">📈 交易小助手</a>
+  <div class="status">
+    {% if market_open %}
+      <span class="dot live"></span>盘中 · 时段已过 {{ session_pct }}%
+    {% else %}
+      <span class="dot"></span>休市
+    {% endif %}
+    <span class="sep">·</span>{{ now }}
+  </div>
+</header>
+<main>{% block content %}{% endblock %}</main>
+<footer>
+  数据：Alpaca（报价）+ yfinance（历史）· 本页仅供参考，不构成投资建议
+</footer>
+</body>
+</html>

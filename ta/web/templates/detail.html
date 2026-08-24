@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ symbol }} · 交易小助手{% endblock %}
+{% block content %}
+
+<section class="detail-head">
+  <div>
+    <h1>{{ symbol }} <span class="group-tag">{{ groups_meta[group].label }}</span></h1>
+    <div class="price-row">
+      <span class="big-price">${{ '{:,.2f}'.format(row.price) }}</span>
+      <span class="big-change {{ 'm-up' if row.change > 0 else ('m-down' if row.change < 0 else '') }}">
+        {{ '↑' if row.change > 0 else ('↓' if row.change < 0 else '·') }}
+        {{ '%+.2f'|format(row.change) }}%
+      </span>
+    </div>
+  </div>
+  <a class="back" href="/">← 全部</a>
+</section>
+
+<section class="card">
+  <h2>价格与均线 <span class="h2-note">近 180 个交易日</span></h2>
+  <div class="legend">
+    <span><i class="sw sw-price"></i>价格</span>
+    <span><i class="sw sw-20"></i>MA20</span>
+    <span><i class="sw sw-50"></i>MA50</span>
+    <span><i class="sw sw-200"></i>MA200</span>
+  </div>
+  <div class="chart-scroll">{{ price_svg|safe }}</div>
+</section>
+
+<section class="card">
+  <h2>RSI(14)</h2>
+  <div class="chart-scroll">{{ rsi_svg|safe }}</div>
+</section>
+
+<section class="card">
+  <h2>关键读数</h2>
+  <div class="table-scroll">
+  <table class="kv">
+    <tbody>
+      <tr><th>趋势</th><td>{{ row.snap.trend() if row.snap else '-' }}</td></tr>
+      <tr><th>RSI(14)</th><td>{{ (row.snap.rsi if row.snap else None)|meter|safe }}</td></tr>
+      {% for p in [20, 50, 200] %}
+      <tr><th>MA{{ p }}</th><td>
+        {% set v = row.snap.sma.get(p) if row.snap else None %}
+        {% set g = row.snap.sma_gap_pct.get(p) if row.snap else None %}
+        {% if v %}${{ '{:,.2f}'.format(v) }}
+          <span class="{{ 'm-up' if g > 0 else 'm-down' }}">（{{ '%+.1f'|format(g) }}%）</span>
+        {% else %}<span class="muted">数据不足</span>{% endif %}
+      </td></tr>
+      {% endfor %}
+      <tr><th>量比</th><td>
+        {% if row.snap and row.snap.volume_ratio %}
+          {{ '%.2f'|format(row.snap.volume_ratio) }}x
+          {% if row.snap.volume_ratio_projected %}<span class="muted">（盘中折算预估）</span>{% endif %}
+        {% else %}<span class="muted">-</span>{% endif %}
+      </td></tr>
+      <tr><th>昨收</th><td>{% if row.quote %}${{ '{:,.2f}'.format(row.quote.prev_close) }}{% else %}-{% endif %}</td></tr>
+      <tr><th>数据源</th><td>{{ row.quote.source if row.quote else '-' }}</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}
