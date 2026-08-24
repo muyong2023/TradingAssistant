@@ -1,0 +1,74 @@
+# 交易小助手配置
+# 改完不用重启开发中的进程，定时任务下次运行时自动生效。
+
+market:
+  timezone: America/New_York
+  # 只在交易日运行；节假日由 Alpaca calendar 接口判定
+  session:
+    premarket_report: "09:00"   # 开盘前 30 分钟
+    postclose_report: "16:15"   # 收盘后 15 分钟
+  intraday:
+    poll_interval_minutes: 5
+    window: ["09:30", "16:00"]
+
+watchlists:
+  # alert.pct 是当日涨跌幅告警阈值（绝对值，涨跌都报）。
+  # 按波动性分档：防御股跌 5% 是大事，高波动股 15% 才值得响。
+  core_mega:
+    label: "核心大盘"
+    alert: { pct: [7, 12] }
+    symbols: [NVDA, MSFT, GOOGL, AMZN, META, AAPL, TSLA, TSM, AMD, MU]
+
+  defensive:
+    label: "消费防御"
+    alert: { pct: [5, 9] }
+    symbols: [COST, JNJ, KO, MCD, PEP, PG, WMT]
+
+  growth_ai:
+    label: "成长/AI 产业链"
+    alert: { pct: [10, 18] }
+    symbols: [PLTR, CBRS, NBIS, COHR, LITE, GLW, SNDK, HOOD, FIG]
+
+  high_vol:
+    label: "高波动"
+    alert: { pct: [15, 25] }
+    symbols: [SMR, CEG, IONQ, SPCX, MRNA, LUMN]
+
+  etf:
+    label: "ETF / 基准"
+    alert: { pct: [3, 6] }
+    # 这三只同时用作晨报里的市场基准
+    symbols: [SPY, IGV, GLD, SGOV]
+    # SGOV 是超短国债 ETF（现金等价物），日波动 <0.1%，
+    # 上面的 ±3% 阈值对它形同关闭 —— 它在这里是给看板算现金仓位/收益率用的，不是为了告警。
+
+benchmarks: [SPY, IGV, GLD]
+
+indicators:
+  sma: [20, 50, 200]
+  ema: [12, 26]
+  rsi:
+    period: 14
+    oversold: 20
+    overbought: 80
+  volume:
+    # 当日量 / 过去 N 日均量，超过 ratio 视为放量
+    lookback: 20
+    spike_ratio: 2.0
+
+alerts:
+  # 同一标的、同一档位，每个交易日只推一次
+  dedupe: per_symbol_per_tier_per_day
+  rsi_alert: true
+  volume_spike_alert: false   # 先关掉，噪音大，观察一阵再开
+
+data:
+  quotes_provider: alpaca      # 实时/分钟线
+  history_provider: yahoo      # 日线、财报、估值
+  fallback: true               # 主源失败时自动切换
+  cache_ttl_seconds: 60
+
+llm:
+  model: claude-opus-5
+  # 晨报和盘后报告由 Claude 撰写；关掉则退化为纯指标模板
+  enabled: true
