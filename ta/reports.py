@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ta.config import config, watchlists
+from ta.config import alert_tiers, config, watchlists
 from ta.data.base import Quote
 from ta.indicators import Snapshot
 from ta.market import now_et
+from ta.data.news import NewsItem
+from ta.market import ET
 from ta.notify.telegram import escape
 
 
@@ -78,14 +80,51 @@ def _benchmark_line(digest: Digest) -> str:
     return "📊 " + "  ·  ".join(parts)
 
 
-def premarket_report(digest: Digest) -> str:
-    """开盘前 30 分钟推送：昨日收盘状态 + 今日关注点。"""
+def notable_symbols(digest: Digest) -> set[str]:
+    """今天本来就该多看一眼的标的：RSI 极值，或波动已达本组首档阈值。
+
+    新闻排序拿它做加权 —— 有异动的票，它的新闻更值得先读。
+    """
+    out: set[str] = set()
+    over, under = digest.rsi_extremes()
+    out.update(r.symbol for r in over + under)
+    for r in digest.rows:
+        tiers = alert_tiers(r.symbol)
+        if tiers and abs(r.change) >= min(tiers):
+            out.add(r.symbol)
+    return out
+
+
+def format_news(items: list[NewsItem], releases: list[NewsItem] | None = None) -> list[str]:
+    """渲染新闻区块。标题带链接，Telegram 侧已关闭链接预览。"""
+    lines = ["<b>📰 隔夜要闻</b>"]
+    for item in items:
+        syms = "/".join(item.symbols[:3])
+        when = item.created_at.astimezone(ET).strftime("%m-%d %H:%M")
+        headline = escape(item.headline)
+        title = f'<a href="{escape(item.url)}">{headline}</a>' if item.url else headline
+        lines.append(f"• <b>{syms}</b> {title}")
+        lines.append(f"  <i>{escape(item.source)} · {when} ET</i>")
+
+    if releases:
+        #  宏观数据无正文可点，压缩成一行，不占用个股新闻的名额
+        joined = "　".join(escape(r.headline) for r in releases)
+        lines += ["", f"<b>📈 数据发布</b>", f"<i>{joined}</i>"]
+    return lines
+
+
+def premarket_report(digest: Digest, news: list[NewsItem] | None = None,
+                     releases: list[NewsItem] | None = None) -> str:
+    """开盘前 30 分钟推送：隔夜消息 + 收盘状态 + 今日关注点。"""
     ts = now_et().strftime("%Y-%m-%d %a")
     lines = [f"<b>☀️ 盘前简报</b>  {ts}", ""]
 
     bench = _benchmark_line(digest)
     if bench:
         lines += [f"<i>基准（昨收）</i>", bench, ""]
+
+    if news or releases:
+        lines += format_news(news or [], releases) + [""]
 
     over, under = digest.rsi_extremes()
     watch: list[str] = []

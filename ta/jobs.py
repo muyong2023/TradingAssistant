@@ -18,11 +18,13 @@ from ta import store
 from ta.alerts import evaluate, filter_new, render
 from ta.config import all_symbols, config
 from ta.data.base import DataError
+from ta.data.news import AlpacaNews, compile_filters, data_releases, rank
 from ta.data.router import DataRouter
 from ta.indicators import compute
-from ta.market import is_market_hours, now_et, session_fraction
+from ta.market import is_market_hours, last_session_close, now_et, session_fraction
 from ta.notify.telegram import Telegram
-from ta.reports import Digest, Row, postclose_report, premarket_report
+from ta.reports import (Digest, Row, notable_symbols, postclose_report,
+                        premarket_report)
 
 log = logging.getLogger("ta.jobs")
 
@@ -71,8 +73,29 @@ def job_premarket(dry_run: bool = False) -> int:
         return 0
     store.init_db()
     digest = _collect(router, all_symbols())
-    text = premarket_report(digest)
+    news, releases = _overnight_news(digest)
+    text = premarket_report(digest, news=news, releases=releases)
     return _deliver(text, dry_run, label="晨报")
+
+
+def _overnight_news(digest: Digest) -> tuple[list, list]:
+    """抓隔夜新闻，返回（正文新闻, 数据发布）。
+
+    抓不到就返回空 —— 新闻是锦上添花，不能因为它挂了
+    让整份晨报发不出去。"""
+    cfg = config().get("news", {})
+    if not cfg.get("enabled", True):
+        return [], []
+    try:
+        items = AlpacaNews().fetch(all_symbols(), last_session_close(), limit=60)
+    except Exception as exc:
+        log.warning("新闻抓取失败，晨报将不含新闻区块：%s", exc)
+        return [], []
+    news = rank(items, boosted=notable_symbols(digest),
+                limit=int(cfg.get("max_items", 10)),
+                per_symbol=int(cfg.get("per_symbol", 2)),
+                filters=compile_filters(cfg.get("exclude_patterns")))
+    return news, data_releases(items, limit=int(cfg.get("max_releases", 4)))
 
 
 def job_postclose(dry_run: bool = False) -> int:
