@@ -1,0 +1,12 @@
+# 直接依赖。传递依赖交给 pip 解析，不锁死以免与将来的 Python 版本冲突。
+pyyaml>=6.0
+pandas>=2.2
+numpy>=1.26
+yfinance>=0.2.50
+requests>=2.32
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+
+# 开发
+pytest>=8.0
