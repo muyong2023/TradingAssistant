@@ -97,6 +97,11 @@ macro:
   #  - { date: 2026-09-11, name: "CPI", detail: "8 月通胀", time: "08:30" }
   #  - { date: 2026-09-25, name: "核心 PCE", detail: "联储偏好的通胀指标", time: "08:30" }
 
+earnings:
+  enabled: true
+  # 晨报里展示未来几天的财报日程
+  lookahead_days: 14
+
 llm:
   model: claude-opus-5
   # 晨报和盘后报告由 Claude 撰写；关掉则退化为纯指标模板

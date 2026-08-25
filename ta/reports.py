@@ -12,6 +12,7 @@ from ta.data.base import Quote
 from ta.indicators import Snapshot
 from ta.market import now_et
 from ta.data.news import NewsItem
+from ta.earnings import EarningsEvent
 from ta.macro import MacroEvent, classify
 from ta.market import ET, now_et
 from ta.notify.telegram import escape
@@ -145,10 +146,29 @@ def format_calendar(events: list[MacroEvent], today,
     return lines
 
 
+def format_earnings(events: list[EarningsEvent], today) -> list[str]:
+    """财报日程。今明两天的加粗 —— 财报前后波动最大，需要提前知道。"""
+    if not events:
+        return []
+    lines = ["<b>📊 财报日程</b>"]
+    for e in events:
+        delta = (e.day - today).days
+        if delta <= 0:
+            prefix, bold = "今天", True
+        elif delta == 1:
+            prefix, bold = "明天", True
+        else:
+            prefix, bold = e.day.strftime("%m-%d"), False
+        text = f"{prefix}　{escape(e.label())}"
+        lines.append(f"• <b>{text}</b>" if bold else f"• {text}")
+    return lines
+
+
 def premarket_report(digest: Digest, news: list[NewsItem] | None = None,
                      releases: list[NewsItem] | None = None,
                      calendar: list[MacroEvent] | None = None,
-                     fomc: MacroEvent | None = None) -> str:
+                     fomc: MacroEvent | None = None,
+                     earnings: list[EarningsEvent] | None = None) -> str:
     """开盘前 30 分钟推送：宏观日程 + 隔夜消息 + 收盘状态 + 今日关注点。"""
     ts = now_et().strftime("%Y-%m-%d %a")
     lines = [f"<b>☀️ 盘前简报</b>  {ts}", ""]
@@ -157,9 +177,13 @@ def premarket_report(digest: Digest, news: list[NewsItem] | None = None,
     if bench:
         lines += [f"<i>基准（昨收）</i>", bench, ""]
 
+    today = now_et().date()
     if calendar or fomc:
         #  放在最前：今天有没有 CPI 或利率决议，决定了整天怎么看盘
-        lines += format_calendar(calendar or [], now_et().date(), fomc) + [""]
+        lines += format_calendar(calendar or [], today, fomc) + [""]
+
+    if earnings:
+        lines += format_earnings(earnings, today) + [""]
 
     if news or releases:
         lines += format_news(news or [], releases) + [""]

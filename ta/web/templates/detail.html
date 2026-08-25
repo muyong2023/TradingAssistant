@@ -55,6 +55,18 @@
         {% else %}<span class="muted">-</span>{% endif %}
       </td></tr>
       <tr><th>昨收</th><td>{% if row.quote %}${{ '{:,.2f}'.format(row.quote.prev_close) }}{% else %}-{% endif %}</td></tr>
+      {% if earnings %}
+      <tr><th>下次财报</th><td>
+        {{ earnings.day.strftime('%Y-%m-%d') }}
+        {% if not earnings.confirmed %}<span class="muted">（日期未定）</span>{% endif %}
+        {% if earnings.eps_estimate is not none %}
+          <span class="muted">· EPS 预期 ${{ '%.2f'|format(earnings.eps_estimate) }}</span>
+        {% endif %}
+        {% if earnings.revenue_estimate %}
+          <span class="muted">· 营收 ${{ '%.1f'|format(earnings.revenue_estimate / 1e9) }}B</span>
+        {% endif %}
+      </td></tr>
+      {% endif %}
       <tr><th>数据源</th><td>{{ row.quote.source if row.quote else '-' }}</td></tr>
     </tbody>
   </table>

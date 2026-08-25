@@ -20,6 +20,7 @@ from ta.config import all_symbols, config
 from ta.data.base import DataError
 from ta.data.news import AlpacaNews, compile_filters, data_releases, rank
 from ta.data.router import DataRouter
+from ta.earnings import upcoming as earnings_upcoming
 from ta.indicators import compute
 from ta.macro import next_fomc, upcoming
 from ta.market import is_market_hours, last_session_close, now_et, session_fraction
@@ -77,8 +78,21 @@ def job_premarket(dry_run: bool = False) -> int:
     news, releases = _overnight_news(digest)
     calendar, fomc = _macro_calendar()
     text = premarket_report(digest, news=news, releases=releases,
-                            calendar=calendar, fomc=fomc)
+                            calendar=calendar, fomc=fomc,
+                            earnings=_earnings())
     return _deliver(text, dry_run, label="晨报")
+
+
+def _earnings() -> list:
+    """未来若干天内的 watchlist 财报。失败不影响晨报发出。"""
+    cfg = config().get("earnings", {})
+    if not cfg.get("enabled", True):
+        return []
+    try:
+        return earnings_upcoming(all_symbols(), int(cfg.get("lookahead_days", 14)))
+    except Exception as exc:
+        log.warning("财报日程获取失败：%s", exc)
+        return []
 
 
 def _macro_calendar() -> tuple[list, object]:

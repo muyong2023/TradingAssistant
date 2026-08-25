@@ -44,10 +44,15 @@ class MacroEvent:
     #  官方日历为 True；规则推导的为 False，界面上标"预计"
     confirmed: bool = True
     at: time | None = None
+    #  通胀 / 就业 / 联储 …… 用于加标签，不与 detail 混用
+    category: str = ""
 
     def label(self) -> str:
-        parts = [self.name]
-        if self.detail:
+        parts = []
+        if self.category:
+            parts.append(f"[{self.category}]")
+        parts.append(self.name)
+        if self.detail and self.detail != self.category:
             parts.append(self.detail)
         text = " ".join(parts)
         return text if self.confirmed else f"{text}（预计）"
@@ -94,7 +99,7 @@ def parse_fomc(html: str) -> list[MacroEvent]:
                 continue
             detail = "利率决议 + 经济预测/记者会" if has_sep else "利率决议"
             events.append(MacroEvent(day=when, name="FOMC 会议结束",
-                                     detail=detail, at=time(14, 0)))
+                                     detail=detail, category="联储", at=time(14, 0)))
     return sorted(events, key=lambda e: e.day)
 
 
@@ -107,7 +112,7 @@ def _read_cache() -> list[MacroEvent] | None:
         if date.today() - fetched > timedelta(days=CACHE_TTL_DAYS):
             return None
         return [MacroEvent(day=date.fromisoformat(e["day"]), name=e["name"],
-                           detail=e["detail"], confirmed=True,
+                           detail=e["detail"], category="联储", confirmed=True,
                            at=time(14, 0)) for e in raw["events"]]
     except Exception as exc:
         log.warning("FOMC 缓存不可用：%s", exc)
@@ -144,7 +149,7 @@ def fomc_meetings(force: bool = False) -> list[MacroEvent]:
         try:
             raw = json.loads(CACHE_PATH.read_text())
             return [MacroEvent(day=date.fromisoformat(e["day"]), name=e["name"],
-                               detail=e["detail"], at=time(14, 0))
+                               detail=e["detail"], category="联储", at=time(14, 0))
                     for e in raw["events"]]
         except Exception:
             pass
@@ -167,10 +172,11 @@ def recurring_events(start: date, end: date) -> list[MacroEvent]:
     while day <= end:
         if day.weekday() == 3:      # 周四
             events.append(MacroEvent(day=day, name="初请失业金", detail="每周",
-                                     confirmed=True, at=time(8, 30)))
+                                     category="就业", confirmed=True, at=time(8, 30)))
         if day.weekday() == 4 and day.day <= 7:   # 当月第一个周五
-            events.append(MacroEvent(day=day, name="非农就业报告",
-                                     detail="失业率 / 新增就业",
+            #  名称与 econ 源保持一致，便于两边去重
+            events.append(MacroEvent(day=day, name="非农就业",
+                                     detail="失业率 / 新增就业", category="就业",
                                      confirmed=False, at=time(8, 30)))
         day += timedelta(days=1)
     return events
@@ -194,6 +200,7 @@ def parse_extra(entries: list[dict] | None) -> list[MacroEvent]:
                 at = time(int(hh), int(mm or 0))
             out.append(MacroEvent(day=day, name=str(raw["name"]),
                                   detail=str(raw.get("detail", "")),
+                                  category=str(raw.get("category", "")),
                                   confirmed=True, at=at))
         except Exception as exc:
             log.warning("宏观日历配置项无法解析，已跳过：%s（%s）", raw, exc)
@@ -212,14 +219,52 @@ def next_fomc(today: date | None = None) -> MacroEvent | None:
 
 
 def upcoming(days: int = 7, today: date | None = None,
-             extra: list[dict] | None = None) -> list[MacroEvent]:
-    """未来若干天内的宏观事件，按日期排序。"""
+             extra: list[dict] | None = None,
+             use_econ: bool = True) -> list[MacroEvent]:
+    """未来若干天内的宏观事件，按日期排序。
+
+    三个来源按可靠性叠加，后者不覆盖前者：
+      1. FOMC —— 美联储官网，权威
+      2. 经济发布 —— FRED（有 key 时）或 Nasdaq
+      3. 规则推导 —— 仅用于填补第 2 步没给出的项
+
+    第 3 步是兜底：一旦 econ 源已经给出某个发布（如初请失业金），
+    就丢弃规则推导的同名事件，避免同一件事出现两次、
+    且日期还可能不一致。
+    """
     today = today or datetime.now(ET).date()
     end = today + timedelta(days=days)
+
     events = [e for e in fomc_meetings() if today <= e.day <= end]
-    events += recurring_events(today, end)
+
+    econ_names: set[str] = set()
+    if use_econ:
+        from ta.data.econ import upcoming as econ_upcoming
+        try:
+            for e in econ_upcoming(today, days):
+                econ_names.add(e.name)
+                events.append(MacroEvent(day=e.day, name=e.name,
+                                         category=e.category, confirmed=True,
+                                         at=e.at))
+        except Exception as exc:
+            log.warning("经济日历获取失败，将退回规则推导：%s", exc)
+
+    for e in recurring_events(today, end):
+        if e.name not in econ_names:
+            events.append(e)
+
     events += [e for e in parse_extra(extra) if today <= e.day <= end]
-    return sorted(events, key=lambda e: (e.day, e.at or time(0, 0)))
+
+    #  同一天同名只留一条
+    seen: set[tuple] = set()
+    unique = []
+    for e in sorted(events, key=lambda e: (e.day, e.at or time(0, 0), e.name)):
+        key = (e.day, e.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(e)
+    return unique
 
 
 # --------------------------------------------------------------------------

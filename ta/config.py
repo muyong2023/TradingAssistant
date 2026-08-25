@@ -36,6 +36,7 @@ class Secrets:
     alpaca_key_id: str
     alpaca_secret: str
     anthropic_api_key: str
+    fred_api_key: str = ""
 
     def require(self, *names: str) -> None:
         """在真正需要某个凭据时才报错，而不是一启动就拦住。"""
@@ -55,6 +56,7 @@ def secrets() -> Secrets:
         alpaca_key_id=env.get("ALPACA_API_KEY_ID", ""),
         alpaca_secret=env.get("ALPACA_API_SECRET", ""),
         anthropic_api_key=env.get("ANTHROPIC_API_KEY", ""),
+        fred_api_key=env.get("FRED_API_KEY", ""),
     )
 
 

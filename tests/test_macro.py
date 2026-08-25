@@ -51,14 +51,14 @@ def test_recurring_jobless_claims_every_thursday():
 
 def test_recurring_nfp_first_friday_only():
     events = recurring_events(date(2026, 9, 1), date(2026, 9, 30))
-    nfp = [e.day for e in events if e.name == "非农就业报告"]
+    nfp = [e.day for e in events if e.name == "非农就业"]
     assert nfp == [date(2026, 9, 4)]
 
 
 def test_nfp_marked_unconfirmed():
     """非农偶因假期挪期，规则推导的日期必须标注为预计。"""
     events = recurring_events(date(2026, 9, 1), date(2026, 9, 30))
-    nfp = next(e for e in events if e.name == "非农就业报告")
+    nfp = next(e for e in events if e.name == "非农就业")
     assert nfp.confirmed is False
     assert "预计" in nfp.label()
 
@@ -114,3 +114,49 @@ def test_parse_extra_skips_bad_entry_without_failing_others():
 
 def test_parse_extra_empty():
     assert parse_extra(None) == []
+
+
+def test_upcoming_prefers_econ_source_over_rules(monkeypatch):
+    """econ 源已给出初请失业金时，规则推导的同名事件必须丢弃，
+    否则同一件事会出现两次、日期还可能不一致。"""
+    from datetime import time as _t
+
+    import ta.macro as m
+    from ta.data.econ import EconEvent
+
+    monkeypatch.setattr(m, "fomc_meetings", lambda: [])
+    monkeypatch.setattr(
+        "ta.data.econ.upcoming",
+        lambda start, days: [EconEvent(date(2026, 8, 27), "初请失业金", "就业", _t(8, 30))],
+    )
+    events = m.upcoming(7, today=date(2026, 8, 24))
+    claims = [e for e in events if e.name == "初请失业金"]
+    assert len(claims) == 1
+    assert claims[0].category == "就业"      # 来自 econ 源而非规则
+
+
+def test_upcoming_falls_back_to_rules_when_econ_empty(monkeypatch):
+    import ta.macro as m
+    monkeypatch.setattr(m, "fomc_meetings", lambda: [])
+    monkeypatch.setattr("ta.data.econ.upcoming", lambda start, days: [])
+    events = m.upcoming(7, today=date(2026, 8, 24))
+    assert any(e.name == "初请失业金" for e in events)
+
+
+def test_upcoming_survives_econ_failure(monkeypatch):
+    """经济日历挂掉不能让整份日历失败。"""
+    import ta.macro as m
+
+    def boom(start, days):
+        raise RuntimeError("网络挂了")
+
+    monkeypatch.setattr(m, "fomc_meetings", lambda: [])
+    monkeypatch.setattr("ta.data.econ.upcoming", boom)
+    events = m.upcoming(7, today=date(2026, 8, 24))
+    assert any(e.name == "初请失业金" for e in events)
+
+
+def test_label_does_not_repeat_category():
+    e = MacroEvent(date(2026, 8, 25), "消费者信心", detail="信心",
+                   category="信心", at=None)
+    assert e.label() == "[信心] 消费者信心"

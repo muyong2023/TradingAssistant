@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from ta.config import all_symbols, config, group_of, watchlists
 from ta.data.base import DataError
 from ta.data.router import DataRouter
+from ta.earnings import all_events as earnings_all
 from ta.indicators import compute, rsi
 from ta.market import is_market_hours, now_et, session_fraction
 from ta.reports import Digest, Row
@@ -106,10 +107,12 @@ def detail(request: Request, symbol: str):
     #  传完整序列给 price_chart，让它自己在全量上算均线再截取窗口
     window = series[-DETAIL_WINDOW:]
     rsi_vals = rsi([b.close for b in series], cfg["period"])[-DETAIL_WINDOW:]
+    earn = next((e for e in earnings_all(all_symbols()) if e.symbol == symbol), None)
     ctx = {
         **_context(request),
         "row": row,
         "symbol": symbol,
+        "earnings": earn,
         "group": group_of(symbol),
         "price_svg": charts.price_chart(series, window=DETAIL_WINDOW),
         "rsi_svg": charts.rsi_chart(window, rsi_vals, cfg["oversold"], cfg["overbought"]),
