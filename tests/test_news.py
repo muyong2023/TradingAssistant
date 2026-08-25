@@ -156,3 +156,27 @@ def test_noise_filter_drops_template_articles():
 def test_no_filters_keeps_everything():
     items = [item(1, ["NVDA"]), item(2, ["KO"])]
     assert len(rank(items, limit=5, filters=[])) == 2
+
+
+def test_core_releases_survive_the_routine_limit():
+    """曾经的 bug：只取最近 4 条，CPI 会被更晚发布的房价指数挤掉。"""
+    from ta.data.news import data_releases
+    #  前三个词必须各不相同，否则会被"同一份发布"的去重规则合并
+    names = ["Housing Starts Rose", "Building Permits Fell", "Redbook Sales Up",
+             "Chicago Fed Index", "Durable Goods Orders", "Factory Orders Slipped",
+             "Trade Balance Widened", "Wholesale Inventories Rose"]
+    routine = [quote_item(i + 1, f"{n} In June") for i, n in enumerate(names)]
+    cpi = quote_item(0, "US CPI For August Rises 2.9% YoY")   # 时间戳最早
+    picked = data_releases(routine + [cpi], limit=4)
+    assert cpi in picked
+    assert picked[0] is cpi                    # 核心排在最前
+    assert len(picked) == 5                    # 4 条常规 + 1 条核心
+
+
+def test_core_releases_have_own_cap():
+    from ta.data.news import data_releases
+    cores = [quote_item(i, h) for i, h in enumerate([
+        "US CPI Rose 2.9%", "Core PCE Index Up", "Nonfarm Payrolls Added 175K",
+        "Initial Jobless Claims Fell", "Fed Interest Rate Held",
+        "ISM Manufacturing PMI Slipped"])]
+    assert len(data_releases(cores, limit=4, core_limit=3)) == 3

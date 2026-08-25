@@ -148,13 +148,21 @@ def is_noise(item: NewsItem, filters: list[re.Pattern]) -> bool:
     return any(f.search(item.headline) for f in filters)
 
 
-def data_releases(items: list[NewsItem], limit: int = 4) -> list[NewsItem]:
-    """无正文的数据发布，按时间倒序，同一份数据只留一条。
+def data_releases(items: list[NewsItem], limit: int = 4,
+                  core_limit: int = 6) -> list[NewsItem]:
+    """无正文的数据发布，同一份数据只留一条。
 
     "USA Building Permits For July" 与 "USA Building Permits (MoM) For July"
     是同一次发布的两个口径，按标题前几个词去重。
+
+    核心发布（CPI、非农、利率决议等）单独计额度并优先保留：
+    单纯按时间取最近 N 条的话，CPI 会被当天更晚发布的房价指数、
+    Redbook 零售挤掉 —— 那是本末倒置。
     """
-    out: list[NewsItem] = []
+    from ta.macro import classify
+
+    core: list[NewsItem] = []
+    routine: list[NewsItem] = []
     seen: set[str] = set()
     for item in sorted(items, key=lambda n: n.created_at, reverse=True):
         if item.has_article:
@@ -163,10 +171,12 @@ def data_releases(items: list[NewsItem], limit: int = 4) -> list[NewsItem]:
         if key in seen:
             continue
         seen.add(key)
-        out.append(item)
-        if len(out) >= limit:
-            break
-    return out
+        if classify(item.headline):
+            if len(core) < core_limit:
+                core.append(item)
+        elif len(routine) < limit:
+            routine.append(item)
+    return core + routine
 
 
 def rank(items: list[NewsItem], boosted: set[str] | None = None,

@@ -12,7 +12,8 @@ from ta.data.base import Quote
 from ta.indicators import Snapshot
 from ta.market import now_et
 from ta.data.news import NewsItem
-from ta.market import ET
+from ta.macro import MacroEvent, classify
+from ta.market import ET, now_et
 from ta.notify.telegram import escape
 
 
@@ -107,21 +108,58 @@ def format_news(items: list[NewsItem], releases: list[NewsItem] | None = None) -
         lines.append(f"  <i>{escape(item.source)} · {when} ET</i>")
 
     if releases:
-        #  宏观数据无正文可点，压缩成一行，不占用个股新闻的名额
-        joined = "　".join(escape(r.headline) for r in releases)
-        lines += ["", f"<b>📈 数据发布</b>", f"<i>{joined}</i>"]
+        core = [(classify(r.headline), r) for r in releases]
+        major = [(tag, r) for tag, r in core if tag]
+        routine = [r for tag, r in core if not tag]
+        if major:
+            #  CPI、非农、利率决议这类会推动全市场，必须单独列出，
+            #  不能和房价指数、零售连锁销售挤在同一行里
+            lines += ["", "<b>🔔 核心数据</b>"]
+            lines += [f"• <b>[{tag}]</b> {escape(r.headline)}" for tag, r in major]
+        if routine:
+            joined = "　".join(escape(r.headline) for r in routine)
+            lines += ["", "<b>📈 其他数据</b>", f"<i>{joined}</i>"]
+    return lines
+
+
+def format_calendar(events: list[MacroEvent], today,
+                    fomc: MacroEvent | None = None) -> list[str]:
+    """未来几天的宏观日程。今天的事件单独标出来。"""
+    if not events and not fomc:
+        return []
+    lines = ["<b>📅 宏观日程</b>"]
+    for e in events:
+        when = e.at.strftime("%H:%M") if e.at else "全天"
+        if e.day == today:
+            lines.append(f"• <b>今天 {when} ET　{escape(e.label())}</b>")
+        else:
+            delta = (e.day - today).days
+            prefix = "明天" if delta == 1 else e.day.strftime("%m-%d")
+            lines.append(f"• {prefix} {when} ET　{escape(e.label())}")
+
+    #  FOMC 常在窗口之外，但它是日程里最重要的一项，单独带倒计时展示
+    if fomc and not any(e.day == fomc.day and "FOMC" in e.name for e in events):
+        days = (fomc.day - today).days
+        lines.append(f"• <b>下次 FOMC</b>　{fomc.day.strftime('%m-%d')}"
+                     f"（{days} 天后）　{escape(fomc.detail)}")
     return lines
 
 
 def premarket_report(digest: Digest, news: list[NewsItem] | None = None,
-                     releases: list[NewsItem] | None = None) -> str:
-    """开盘前 30 分钟推送：隔夜消息 + 收盘状态 + 今日关注点。"""
+                     releases: list[NewsItem] | None = None,
+                     calendar: list[MacroEvent] | None = None,
+                     fomc: MacroEvent | None = None) -> str:
+    """开盘前 30 分钟推送：宏观日程 + 隔夜消息 + 收盘状态 + 今日关注点。"""
     ts = now_et().strftime("%Y-%m-%d %a")
     lines = [f"<b>☀️ 盘前简报</b>  {ts}", ""]
 
     bench = _benchmark_line(digest)
     if bench:
         lines += [f"<i>基准（昨收）</i>", bench, ""]
+
+    if calendar or fomc:
+        #  放在最前：今天有没有 CPI 或利率决议，决定了整天怎么看盘
+        lines += format_calendar(calendar or [], now_et().date(), fomc) + [""]
 
     if news or releases:
         lines += format_news(news or [], releases) + [""]

@@ -85,6 +85,18 @@ news:
     - "^A Closer Look At"
     - "Stock Moves \\d+% In"
 
+macro:
+  enabled: true
+  # 晨报里展示未来几天的宏观日程
+  lookahead_days: 7
+  # FOMC 日期抓自美联储官网（确定）；初请失业金、非农由规则推导。
+  # CPI / PPI / PCE 的日期 BLS 拒绝程序抓取，需要手填 ——
+  # 官方日程见 https://www.bls.gov/schedule/news_release/
+  # 与 https://www.bea.gov/news/schedule
+  extra_events: []
+  #  - { date: 2026-09-11, name: "CPI", detail: "8 月通胀", time: "08:30" }
+  #  - { date: 2026-09-25, name: "核心 PCE", detail: "联储偏好的通胀指标", time: "08:30" }
+
 llm:
   model: claude-opus-5
   # 晨报和盘后报告由 Claude 撰写；关掉则退化为纯指标模板

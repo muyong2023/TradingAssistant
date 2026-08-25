@@ -21,6 +21,7 @@ from ta.data.base import DataError
 from ta.data.news import AlpacaNews, compile_filters, data_releases, rank
 from ta.data.router import DataRouter
 from ta.indicators import compute
+from ta.macro import next_fomc, upcoming
 from ta.market import is_market_hours, last_session_close, now_et, session_fraction
 from ta.notify.telegram import Telegram
 from ta.reports import (Digest, Row, notable_symbols, postclose_report,
@@ -74,8 +75,24 @@ def job_premarket(dry_run: bool = False) -> int:
     store.init_db()
     digest = _collect(router, all_symbols())
     news, releases = _overnight_news(digest)
-    text = premarket_report(digest, news=news, releases=releases)
+    calendar, fomc = _macro_calendar()
+    text = premarket_report(digest, news=news, releases=releases,
+                            calendar=calendar, fomc=fomc)
     return _deliver(text, dry_run, label="晨报")
+
+
+def _macro_calendar() -> tuple[list, object]:
+    """未来几天的宏观日程 + 下次 FOMC。失败不影响晨报发出。"""
+    cfg = config().get("macro", {})
+    if not cfg.get("enabled", True):
+        return [], None
+    try:
+        events = upcoming(int(cfg.get("lookahead_days", 7)),
+                          extra=cfg.get("extra_events"))
+        return events, next_fomc()
+    except Exception as exc:
+        log.warning("宏观日历获取失败：%s", exc)
+        return [], None
 
 
 def _overnight_news(digest: Digest) -> tuple[list, list]:
