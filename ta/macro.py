@@ -207,6 +207,34 @@ def parse_extra(entries: list[dict] | None) -> list[MacroEvent]:
     return out
 
 
+#  窗口之外也要显示的关键前瞻。这几项决定整段时间的市场基调，
+#  藏在 7 天窗口外等于看不见。
+KEY_LOOKAHEAD = ["CPI", "非农就业"]
+
+
+def next_key_events(today: date | None = None, within: int = 7,
+                    horizon: int = 60) -> list[MacroEvent]:
+    """窗口之外、但值得提前知道的关键发布，各取最近一次。"""
+    today = today or datetime.now(ET).date()
+    after = today + timedelta(days=within)
+    try:
+        #  只查 FRED：它一次请求覆盖整个区间。走 econ.upcoming 会触发
+        #  Nasdaq 的逐日循环，60 天就是 60 次请求，直接把晨报拖到超时。
+        #  没有 FRED key 时返回空 —— 远期日期本来也只有 FRED 可靠。
+        from ta.data.econ import fetch_fred
+        events = fetch_fred(today, today + timedelta(days=horizon))
+    except Exception as exc:
+        log.warning("关键前瞻获取失败：%s", exc)
+        return []
+    out: list[MacroEvent] = []
+    for name in KEY_LOOKAHEAD:
+        nxt = next((e for e in events if e.name == name and e.day > after), None)
+        if nxt:
+            out.append(MacroEvent(day=nxt.day, name=nxt.name,
+                                  category=nxt.category, confirmed=True, at=nxt.at))
+    return sorted(out, key=lambda e: e.day)
+
+
 def next_fomc(today: date | None = None) -> MacroEvent | None:
     """下一次 FOMC 会议。
 

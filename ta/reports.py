@@ -124,9 +124,10 @@ def format_news(items: list[NewsItem], releases: list[NewsItem] | None = None) -
 
 
 def format_calendar(events: list[MacroEvent], today,
-                    fomc: MacroEvent | None = None) -> list[str]:
+                    fomc: MacroEvent | None = None,
+                    lookahead: list[MacroEvent] | None = None) -> list[str]:
     """未来几天的宏观日程。今天的事件单独标出来。"""
-    if not events and not fomc:
+    if not events and not fomc and not lookahead:
         return []
     lines = ["<b>📅 宏观日程</b>"]
     for e in events:
@@ -138,11 +139,19 @@ def format_calendar(events: list[MacroEvent], today,
             prefix = "明天" if delta == 1 else e.day.strftime("%m-%d")
             lines.append(f"• {prefix} {when} ET　{escape(e.label())}")
 
-    #  FOMC 常在窗口之外，但它是日程里最重要的一项，单独带倒计时展示
+    #  以下几项常在窗口之外，但决定整段时间的市场基调，
+    #  藏在窗口外等于看不见，故单独带倒计时展示
+    tail: list[MacroEvent] = []
     if fomc and not any(e.day == fomc.day and "FOMC" in e.name for e in events):
-        days = (fomc.day - today).days
-        lines.append(f"• <b>下次 FOMC</b>　{fomc.day.strftime('%m-%d')}"
-                     f"（{days} 天后）　{escape(fomc.detail)}")
+        tail.append(fomc)
+    tail += [e for e in (lookahead or []) if e.day not in {x.day for x in events}]
+
+    for e in sorted(tail, key=lambda x: x.day):
+        days = (e.day - today).days
+        name = "下次 FOMC" if "FOMC" in e.name else f"下次 {e.name}"
+        suffix = f"　{escape(e.detail)}" if e.detail else ""
+        lines.append(f"• <b>{name}</b>　{e.day.strftime('%m-%d')}"
+                     f"（{days} 天后）{suffix}")
     return lines
 
 
@@ -168,7 +177,8 @@ def premarket_report(digest: Digest, news: list[NewsItem] | None = None,
                      releases: list[NewsItem] | None = None,
                      calendar: list[MacroEvent] | None = None,
                      fomc: MacroEvent | None = None,
-                     earnings: list[EarningsEvent] | None = None) -> str:
+                     earnings: list[EarningsEvent] | None = None,
+                     lookahead: list[MacroEvent] | None = None) -> str:
     """开盘前 30 分钟推送：宏观日程 + 隔夜消息 + 收盘状态 + 今日关注点。"""
     ts = now_et().strftime("%Y-%m-%d %a")
     lines = [f"<b>☀️ 盘前简报</b>  {ts}", ""]
@@ -178,9 +188,9 @@ def premarket_report(digest: Digest, news: list[NewsItem] | None = None,
         lines += [f"<i>基准（昨收）</i>", bench, ""]
 
     today = now_et().date()
-    if calendar or fomc:
+    if calendar or fomc or lookahead:
         #  放在最前：今天有没有 CPI 或利率决议，决定了整天怎么看盘
-        lines += format_calendar(calendar or [], today, fomc) + [""]
+        lines += format_calendar(calendar or [], today, fomc, lookahead) + [""]
 
     if earnings:
         lines += format_earnings(earnings, today) + [""]
