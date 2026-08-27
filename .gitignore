@@ -3,5 +3,8 @@ config/.env
 __pycache__/
 .venv/
 .idea/
-data/
 logs/
+
+# 只忽略根目录的缓存目录。写成 data/ 会匹配任意层级，
+# 把 ta/data/ 这个源码包也一起吞掉（曾导致 econ.py 从未进入仓库）。
+/data/
