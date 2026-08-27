@@ -111,3 +111,31 @@ def test_gives_up_after_max_retries():
 
 def test_escape_html_entities():
     assert escape("Procter & Gamble <test>") == "Procter &amp; Gamble &lt;test&gt;"
+
+
+def test_send_parts_returns_message_ids():
+    s = FakeSession([FakeResponse(payload={"ok": True, "result": {"message_id": 77}})])
+    assert make(s).send_parts("hi") == [77]
+
+
+def test_edit_calls_edit_endpoint():
+    s = FakeSession()
+    assert make(s).edit(77, "新内容") is True
+    assert s.calls[0]["url"].endswith("editMessageText")
+    assert s.calls[0]["data"]["message_id"] == 77
+
+
+def test_edit_treats_not_modified_as_success():
+    """内容没变时 Telegram 返回 400 not modified，这不是故障。"""
+    s = FakeSession([FakeResponse(400, text="Bad Request: message is not modified")])
+    assert make(s).edit(77, "一样的内容") is True
+
+
+def test_edit_returns_false_on_real_error():
+    s = FakeSession([FakeResponse(400, text="Bad Request: message to edit not found")])
+    assert make(s).edit(77, "x") is False
+
+
+def test_delete_swallows_errors():
+    s = FakeSession([FakeResponse(400, text="message can't be deleted")])
+    make(s).delete(77)          # 不应抛出

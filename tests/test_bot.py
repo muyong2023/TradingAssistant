@@ -17,13 +17,29 @@ def bot(tmp_path, monkeypatch):
         telegram_bot_token="t", telegram_chat_id="42",
         alpaca_key_id="k", alpaca_secret="s", anthropic_api_key="a"))
 
-    sent, asked = [], []
+    sent, asked, edits = [], [], []
     monkeypatch.setattr(B.Telegram, "__post_init__", lambda self: None)
     monkeypatch.setattr(B.Telegram, "send", lambda self, text, silent=False: sent.append(text) or 1)
-    monkeypatch.setattr(B, "ask", lambda q, h=None: (asked.append((q, h)) or ("回答", [])))
+    #  占位消息：send_parts 发出后由 edit 就地改写成答案，
+    #  所以最终呈现给用户的文本要从 edits 里取。
+    monkeypatch.setattr(B.Telegram, "send_parts",
+                        lambda self, text, silent=False: [901])
+    monkeypatch.setattr(B.Telegram, "edit",
+                        lambda self, mid, text: edits.append(text) or True)
+    monkeypatch.setattr(B.Telegram, "delete", lambda self, mid: None)
+
+    def fake_ask(q, h=None, on_progress=None):
+        asked.append((q, h))
+        if on_progress:
+            on_progress(["查询报价"])
+        return "回答", []
+
+    monkeypatch.setattr(B, "ask", fake_ask)
 
     instance = B.Bot()
-    instance.sent, instance.asked = sent, asked
+    instance.sent, instance.asked, instance.edits = sent, asked, edits
+    #  用户最终看到的：占位被改写的内容 + 额外发出的分段
+    instance.shown = lambda: edits + sent
     return instance
 
 
@@ -33,14 +49,14 @@ def msg(text, chat_id="42"):
 
 def test_answers_authorized_chat(bot):
     bot.handle(msg("NVDA 怎么样"))
-    assert bot.sent == ["回答"]
+    assert "回答" in bot.shown()
 
 
 def test_ignores_unauthorized_chat_silently(bot):
     """bot 用户名是公开可搜的。对陌生人连"无权访问"都不回——
     那等于确认 bot 存在，且照样花掉一次请求。"""
     bot.handle(msg("你好", chat_id="999"))
-    assert bot.sent == []
+    assert bot.shown() == []
     assert bot.asked == []
 
 
@@ -89,7 +105,7 @@ def test_command_with_bot_suffix(bot):
 def test_scan_command_routes_through_model(bot):
     bot.handle(msg("/scan"))
     assert len(bot.asked) == 1
-    assert bot.sent == ["回答"]
+    assert "回答" in bot.shown()
 
 
 def test_overlong_question_rejected(bot):
@@ -100,17 +116,17 @@ def test_overlong_question_rejected(bot):
 
 def test_empty_message_ignored(bot):
     bot.handle({"chat": {"id": "42"}})
-    assert bot.sent == []
+    assert bot.shown() == []
 
 
 def test_model_failure_reported_not_crashed(bot, monkeypatch):
     import ta.bot as B
 
-    def boom(q, h=None):
+    def boom(q, h=None, on_progress=None):
         raise RuntimeError("接口挂了")
     monkeypatch.setattr(B, "ask", boom)
     bot.handle(msg("问题"))
-    assert "出错了" in bot.sent[0]
+    assert any("出错了" in s for s in bot.shown())
     #  失败的一轮不该污染历史
     assert store.load_chat("42") == []
 
@@ -159,11 +175,78 @@ def test_error_message_is_redacted(bot, monkeypatch):
     """异常消息可能带着含密钥的 URL，不能原样发到 Telegram。"""
     import ta.bot as B
 
-    def boom(q, h=None):
+    def boom(q, h=None, on_progress=None):
         raise RuntimeError("failed: https://api.example.com/x?api_key=SUPERSECRETVALUE123")
     monkeypatch.setattr(B, "ask", boom)
     monkeypatch.setattr(B, "redact", lambda s: str(s).replace("SUPERSECRETVALUE123", "<KEY>"))
     bot.handle(msg("问题"))
-    assert "SUPERSECRETVALUE123" not in bot.sent[0]
+    shown = " ".join(bot.shown())
+    assert "SUPERSECRETVALUE123" not in shown
     #  先脱敏再 HTML 转义，占位符因此显示为实体，Telegram 渲染回 <KEY>
-    assert "&lt;KEY&gt;" in bot.sent[0]
+    assert "&lt;KEY&gt;" in shown
+
+
+def test_placeholder_shows_progress_steps(bot):
+    """40 秒的等待里必须看得见它在干什么，否则和卡死没区别。"""
+    bot.handle(msg("NVDA 怎么样"))
+    assert any("查询报价" in e for e in bot.edits)
+
+
+def test_placeholder_becomes_the_answer(bot):
+    """答案就地替换占位消息，不留下一条"正在查…"的垃圾。"""
+    bot.handle(msg("NVDA 怎么样"))
+    assert bot.edits[-1] == "回答"
+    assert bot.sent == []          # 没有额外发新消息
+
+
+def test_completed_steps_are_struck_through(bot, monkeypatch):
+    import ta.bot as B
+
+    def multi(q, h=None, on_progress=None):
+        on_progress(["查询报价"])
+        on_progress(["搜索网页"])
+        return "回答", []
+    monkeypatch.setattr(B, "ask", multi)
+    bot.handle(msg("问题"))
+    second = bot.edits[1]
+    assert "<s>查询报价</s>" in second      # 已完成的划掉
+    assert "搜索网页…" in second           # 当前的进行中
+
+
+def test_duplicate_progress_not_re_edited(bot, monkeypatch):
+    """内容没变就不要再调编辑接口，白白撞限流。"""
+    import ta.bot as B
+
+    def repeat(q, h=None, on_progress=None):
+        on_progress(["查询报价"])
+        on_progress(["查询报价"])
+        return "回答", []
+    monkeypatch.setattr(B, "ask", repeat)
+    bot.handle(msg("问题"))
+    progress_edits = [e for e in bot.edits if e != "回答"]
+    assert len(progress_edits) == 1
+
+
+def test_long_answer_edits_first_part_and_sends_rest(bot, monkeypatch):
+    import ta.bot as B
+
+    long_answer = "\n".join("x" * 500 for _ in range(20))
+    monkeypatch.setattr(B, "ask", lambda q, h=None, on_progress=None: (long_answer, []))
+    bot.handle(msg("问题"))
+    assert len(bot.sent) >= 1        # 超长部分另发
+    assert bot.edits[-1].startswith("x")
+
+
+def test_falls_back_to_plain_send_when_edit_fails(bot, monkeypatch):
+    """占位消息被用户删掉时，编辑会失败，必须退回正常发送。"""
+    monkeypatch.setattr(type(bot.tg), "edit", lambda self, mid, text: False)
+    bot.handle(msg("问题"))
+    assert "回答" in bot.sent
+
+
+def test_progress_callback_failure_does_not_break_answer(bot, monkeypatch):
+    """进度显示是锦上添花，它挂了不能拖垮回答。"""
+    monkeypatch.setattr(type(bot.tg), "edit",
+                        lambda self, mid, text: (_ for _ in ()).throw(RuntimeError("boom")))
+    bot.handle(msg("问题"))
+    assert "回答" in bot.sent          # 编辑全失败 -> 退回发送

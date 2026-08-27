@@ -110,18 +110,52 @@ class Telegram:
 
     def send(self, text: str, silent: bool = False) -> int:
         """发送文本，自动分段。返回实际发出的消息条数。"""
+        return len(self.send_parts(text, silent=silent))
+
+    def send_parts(self, text: str, silent: bool = False) -> list[int]:
+        """发送并返回每条消息的 message_id（供后续编辑用）。"""
+        ids: list[int] = []
         parts = split_message(text)
         for i, part in enumerate(parts):
-            self._post("sendMessage", {
+            result = self._post("sendMessage", {
                 "chat_id": self.chat_id,
                 "text": part,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": "true",
                 "disable_notification": "true" if silent else "false",
             })
+            ids.append((result.get("result") or {}).get("message_id", 0))
             if i < len(parts) - 1:
                 time.sleep(0.4)      # 连发时给限流留余量
-        return len(parts)
+        return ids
+
+    def edit(self, message_id: int, text: str) -> bool:
+        """改写已发出的消息。返回是否成功。
+
+        文本与原内容完全相同时 Telegram 会返回 400 "message is not
+        modified"，这不是故障，调用方应自行去重；这里把它当成功处理。
+        """
+        try:
+            self._post("editMessageText", {
+                "chat_id": self.chat_id,
+                "message_id": message_id,
+                "text": text[:LIMIT],
+                "parse_mode": "HTML",
+                "disable_web_page_preview": "true",
+            })
+            return True
+        except TelegramError as exc:
+            if "not modified" in str(exc).lower():
+                return True
+            log.debug("编辑消息失败：%s", exc)
+            return False
+
+    def delete(self, message_id: int) -> None:
+        try:
+            self._post("deleteMessage", {"chat_id": self.chat_id,
+                                         "message_id": message_id})
+        except TelegramError as exc:
+            log.debug("删除消息失败：%s", exc)
 
     def send_photo(self, image: bytes, caption: str = "", filename: str = "chart.png") -> None:
         self._post(

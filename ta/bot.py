@@ -25,7 +25,8 @@ from ta import store
 from ta.chat import ask
 from ta.config import config, redact, secrets
 from ta.market import is_market_hours, now_et
-from ta.notify.telegram import Telegram, TelegramError
+from ta.notify.telegram import (Telegram, TelegramError, escape,
+                                split_message)
 
 log = logging.getLogger("ta.bot")
 
@@ -34,6 +35,7 @@ POLL_TIMEOUT = 50          # 长轮询挂起秒数
 HTTP_TIMEOUT = POLL_TIMEOUT + 15
 OFFSET_KEY = "telegram_offset"
 MAX_QUESTION = 2000
+WAIT_ICON = "⏳"
 
 HELP = """<b>股票助手</b>
 
@@ -112,6 +114,67 @@ class Bot:
         thread.start()
         return thread
 
+    def _progress_reporter(self):
+        """返回（回调函数, 占位消息 id 容器）。
+
+        先发一条占位消息，随模型调用工具实时改写它，最后由调用方
+        把它就地改成答案。比只靠"正在输入"提示强得多——那个提示在
+        顶栏一闪而过，用户看不出它在查什么、还要多久。
+        """
+        holder: dict = {"id": 0, "last": "", "steps": []}
+        try:
+            ids = self.tg.send_parts(f"{WAIT_ICON} 正在查…", silent=True)
+            holder["id"] = ids[0] if ids else 0
+        except TelegramError as exc:
+            log.debug("占位消息发送失败：%s", exc)
+
+        def report(labels: list[str]) -> None:
+            #  进度显示纯属装饰。它自己吞掉所有异常，而不是指望调用方
+            #  包一层 try —— 任何情况下都不该因为它而丢掉答案。
+            try:
+                _report(labels)
+            except Exception as exc:
+                log.debug("更新进度失败：%s", exc)
+
+        def _report(labels: list[str]) -> None:
+            if not holder["id"]:
+                return
+            for label in labels:
+                if label not in holder["steps"]:
+                    holder["steps"].append(label)
+            #  已完成的步骤打勾，当前这批显示为进行中
+            done = holder["steps"][:-len(labels)] if len(holder["steps"]) > len(labels) else []
+            lines = [f"✓ <s>{escape(s)}</s>" for s in done]
+            lines += [f"{WAIT_ICON} {escape(s)}…" for s in labels]
+            text = "\n".join(lines)
+            if text != holder["last"]:
+                holder["last"] = text
+                self.tg.edit(holder["id"], text)
+
+        return report, holder
+
+    def _finish(self, holder: dict, answer: str) -> None:
+        """把占位消息就地换成答案。"""
+        placeholder = holder.get("id") or 0
+        parts = split_message(answer)
+        try:
+            edited = bool(placeholder and parts and self.tg.edit(placeholder, parts[0]))
+        except Exception as exc:
+            #  编辑只是呈现方式，任何意外都不该让答案丢失
+            log.debug("改写占位消息失败：%s", exc)
+            edited = False
+        if edited:
+            for extra in parts[1:]:
+                self.tg.send(extra)
+            return
+        #  编辑失败（消息被删、网络异常等）就删掉占位再正常发送
+        if placeholder:
+            try:
+                self.tg.delete(placeholder)
+            except Exception:
+                pass
+        self._reply(answer)
+
     def _reply(self, text: str) -> None:
         try:
             self.tg.send(text)
@@ -146,20 +209,21 @@ class Bot:
         started = time.time()
         done = threading.Event()
         self._typing_until(done)
+        report, holder = self._progress_reporter()
         try:
             history = store.load_chat(self.allowed, limit=self.history_turns)
-            answer, _ = ask(text, history)
+            answer, _ = ask(text, history, on_progress=report)
         except Exception as exc:
             log.exception("回答失败")
-            self._reply(f"出错了：<code>{html.escape(redact(str(exc))[:300])}</code>")
+            self._finish(holder, f"出错了：<code>{html.escape(redact(str(exc))[:300])}</code>")
             return
         finally:
             done.set()
 
         store.append_chat(self.allowed, "user", text)
         store.append_chat(self.allowed, "assistant", answer)
-        log.info("已回复（耗时 %.1fs，问题 %d 字）", time.time() - started, len(text))
-        self._reply(answer)
+        log.info("已回复（耗时 %.1fs，%d 步）", time.time() - started, len(holder["steps"]))
+        self._finish(holder, answer)
 
     def handle_command(self, text: str) -> None:
         cmd = text.split()[0].lower().lstrip("/").split("@")[0]
@@ -177,15 +241,16 @@ class Bot:
             }[cmd]
             done = threading.Event()
             self._typing_until(done)
+            report, holder = self._progress_reporter()
             try:
-                answer, _ = ask(prompt, [])
+                answer, _ = ask(prompt, [], on_progress=report)
             except Exception as exc:
                 log.exception("命令 %s 失败", cmd)
-                self._reply(f"出错了：<code>{html.escape(redact(str(exc))[:300])}</code>")
+                self._finish(holder, f"出错了：<code>{html.escape(redact(str(exc))[:300])}</code>")
                 return
             finally:
                 done.set()
-            self._reply(answer)
+            self._finish(holder, answer)
         else:
             self._reply(f"未知命令 {html.escape(cmd)}。发 /help 看可用命令。")
 

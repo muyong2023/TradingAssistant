@@ -306,8 +306,54 @@ def build_system() -> list[dict]:
     ]
 
 
-def ask(question: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
-    """回答一个问题，返回（回复文本, 更新后的对话历史）。"""
+#  工具名 -> 给用户看的说法。带联网搜索的一轮要 40 多秒，
+#  期间必须让用户知道它在干什么，否则和卡死没区别。
+TOOL_LABELS = {
+    "get_watchlist": "读取关注列表",
+    "get_quote": "查询报价",
+    "get_indicators": "计算技术指标",
+    "get_price_history": "拉取历史走势",
+    "get_movers": "统计涨跌排行",
+    "get_news": "检索新闻",
+    "get_macro_calendar": "查询宏观日程",
+    "get_earnings": "查询财报日程",
+    "web_search": "搜索网页",
+    #  web_search_20260209 自带动态过滤，底层会跑代码执行来筛选结果，
+    #  于是以 server_tool_use 的形式冒出来。给它一个人话标签，
+    #  否则用户会在进度里看到裸的 "code_execution"。
+    "code_execution": "整理搜索结果",
+    "web_fetch": "读取网页",
+}
+
+
+def describe_tools(message) -> list[str]:
+    """从一轮响应里提取正在使用的工具，转成中文说法。"""
+    names = []
+    for block in message.content:
+        kind = getattr(block, "type", "")
+        if kind == "tool_use":
+            names.append(getattr(block, "name", ""))
+        elif kind == "server_tool_use":
+            names.append(getattr(block, "name", ""))
+    labels = []
+    for name in names:
+        label = TOOL_LABELS.get(name)
+        if label is None:
+            #  没见过的工具（比如以后新增的服务端工具）也要给人话，
+            #  不能把内部标识符直接摆到用户面前
+            label = "处理数据"
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+def ask(question: str, history: list[dict] | None = None,
+        on_progress=None) -> tuple[str, list[dict]]:
+    """回答一个问题，返回（回复文本, 更新后的对话历史）。
+
+    on_progress(labels) 会在模型每次调用工具时被回调，labels 是中文
+    的工具说明列表。调用方失败不应影响回答本身。
+    """
     s = secrets()
     s.require("anthropic_api_key")
     client = anthropic.Anthropic(api_key=s.anthropic_api_key)
@@ -330,6 +376,13 @@ def ask(question: str, history: list[dict] | None = None) -> tuple[str, list[dic
         final = None
         for message in runner:
             final = message
+            if on_progress:
+                labels = describe_tools(message)
+                if labels:
+                    try:
+                        on_progress(labels)
+                    except Exception:
+                        log.debug("进度回调失败", exc_info=True)
             messages.append({"role": "assistant", "content": message.content})
             tool_response = runner.generate_tool_call_response()
             if tool_response is not None:
