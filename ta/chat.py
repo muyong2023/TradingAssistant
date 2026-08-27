@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 16000
+MAX_RESTARTS = 3   # pause_turn 续跑次数上限
 
 _router = DataRouter()
 
@@ -225,8 +226,23 @@ def get_earnings(symbol: str = "", days: int = 60) -> str:
     return "\n".join(f"{e.day}　{e.label()}" for e in window)
 
 
+#  Anthropic 托管的联网搜索。用它补上本地数据源覆盖不到的东西：
+#  Reddit 讨论、主流媒体报道、行业分析。运行在 Anthropic 服务器上，
+#  不需要额外的 key，也不占用本机网络。
+#
+#  注意 X/Twitter 覆盖很差：2023 年后其内容基本锁在登录墙后，
+#  搜索引擎索引不到，官方 API 最低档 $100/月。这里搜到的多是
+#  转载 X 帖子的第三方网页，而非原帖。
+WEB_SEARCH = {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    #  一轮问答里最多搜几次。不限制的话模型可能连搜十几次，
+    #  Telegram 那头要等一分钟以上。
+    "max_uses": 5,
+}
+
 TOOLS = [get_watchlist, get_quote, get_indicators, get_price_history,
-         get_movers, get_news, get_macro_calendar, get_earnings]
+         get_movers, get_news, get_macro_calendar, get_earnings, WEB_SEARCH]
 
 
 # --------------------------------------------------------------------------
@@ -235,6 +251,21 @@ TOOLS = [get_watchlist, get_quote, get_indicators, get_price_history,
 
 SYSTEM = """你是一个美股看盘助手，通过 Telegram 与用户对话。用户是这个助手的
 拥有者，关注列表和持仓都在工具里。
+
+**工具分工**
+- 价格、指标、财报日期、宏观日程 —— 一律用本地工具，它们直连行情接口，
+  比搜索结果准确且及时。绝不用网页搜索去查股价。
+- 市场讨论、散户情绪、Reddit 上怎么看、媒体报道、行业分析、
+  本地新闻源没覆盖到的事件 —— 用 web_search。
+- 用户问"网上怎么说""Reddit 上什么风向""有什么最新消息"时，
+  先用 web_search，再结合本地指标给判断。
+
+**关于社交媒体内容**
+- 论坛和社交平台上的帖子是观点，不是事实。转述时要说明这是谁的说法，
+  不要把"某个 Reddit 用户认为要涨到 400"写成客观结论。
+- 注意信息时效：搜到的帖子可能是几个月前的，看清日期。
+- X/Twitter 的原帖大多搜不到（内容在登录墙后），搜到的通常是
+  第三方转载。如果用户明确要 X 上的内容，说明这个限制。
 
 **数据纪律**
 - 任何具体数字（价格、涨跌幅、指标、日期、财报预期）都必须来自工具返回的结果。
@@ -282,22 +313,32 @@ def ask(question: str, history: list[dict] | None = None) -> tuple[str, list[dic
     client = anthropic.Anthropic(api_key=s.anthropic_api_key)
 
     messages = list(history or []) + [{"role": "user", "content": question}]
-    runner = client.beta.messages.tool_runner(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=build_system(),
-        tools=TOOLS,
-        messages=messages,
-        thinking={"type": "adaptive"},
-    )
 
+    #  联网搜索耗时较长的一轮可能以 stop_reason="pause_turn" 中断。
+    #  Python 版 runner 不会自动续跑 —— 没有本地工具产出结果它就退出，
+    #  于是返回一个被截断的答案，既不报错也无提示。故在外层重启续跑。
     final = None
-    for message in runner:
-        final = message
-        messages.append({"role": "assistant", "content": message.content})
-        tool_response = runner.generate_tool_call_response()
-        if tool_response is not None:
-            messages.append(tool_response)
+    for _ in range(MAX_RESTARTS + 1):
+        runner = client.beta.messages.tool_runner(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=build_system(),
+            tools=TOOLS,
+            messages=messages,
+            thinking={"type": "adaptive"},
+        )
+        final = None
+        for message in runner:
+            final = message
+            messages.append({"role": "assistant", "content": message.content})
+            tool_response = runner.generate_tool_call_response()
+            if tool_response is not None:
+                messages.append(tool_response)
+        if final is None or final.stop_reason != "pause_turn":
+            break
+        log.info("turn 被暂停，续跑")
+    else:
+        log.warning("重启 %d 次后仍处于 pause_turn，返回当前结果", MAX_RESTARTS)
 
     if final is None:
         return "（没有得到回复，请重试）", list(history or [])

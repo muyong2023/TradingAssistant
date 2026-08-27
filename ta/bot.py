@@ -16,13 +16,14 @@ import html
 import logging
 import signal
 import sys
+import threading
 import time
 
 import requests
 
 from ta import store
 from ta.chat import ask
-from ta.config import config, secrets
+from ta.config import config, redact, secrets
 from ta.market import is_market_hours, now_et
 from ta.notify.telegram import Telegram, TelegramError
 
@@ -89,14 +90,27 @@ class Bot:
         return payload.get("result", []) if payload.get("ok") else []
 
     def _typing(self) -> None:
-        """告诉用户"正在输入"。Claude 带工具调用要几秒到几十秒，
-        没有这个提示会让人以为 bot 死了。"""
         try:
             self.session.post(f"{API}/bot{self.token}/sendChatAction",
                               data={"chat_id": self.allowed, "action": "typing"},
                               timeout=10)
         except requests.RequestException:
             pass
+
+    def _typing_until(self, done: threading.Event) -> threading.Thread:
+        """持续发送"正在输入"，直到 done 被设置。
+
+        Telegram 的输入提示只维持约 5 秒，而带联网搜索的一轮问答实测
+        要 40 秒以上。不续发的话提示早就消失，用户会以为 bot 挂了。
+        """
+        def loop() -> None:
+            while not done.wait(4.0):
+                self._typing()
+
+        thread = threading.Thread(target=loop, daemon=True)
+        self._typing()
+        thread.start()
+        return thread
 
     def _reply(self, text: str) -> None:
         try:
@@ -129,15 +143,18 @@ class Bot:
             self._reply(f"问题太长了（{len(text)} 字），请精简到 {MAX_QUESTION} 字以内。")
             return
 
-        self._typing()
         started = time.time()
+        done = threading.Event()
+        self._typing_until(done)
         try:
             history = store.load_chat(self.allowed, limit=self.history_turns)
             answer, _ = ask(text, history)
         except Exception as exc:
             log.exception("回答失败")
-            self._reply(f"出错了：<code>{html.escape(str(exc)[:300])}</code>")
+            self._reply(f"出错了：<code>{html.escape(redact(str(exc))[:300])}</code>")
             return
+        finally:
+            done.set()
 
         store.append_chat(self.allowed, "user", text)
         store.append_chat(self.allowed, "assistant", answer)
@@ -158,13 +175,16 @@ class Bot:
                 "news": "最近 24 小时我关注的标的有什么重要新闻？",
                 "calendar": "未来两周有哪些宏观数据发布和我持仓的财报？",
             }[cmd]
-            self._typing()
+            done = threading.Event()
+            self._typing_until(done)
             try:
                 answer, _ = ask(prompt, [])
             except Exception as exc:
                 log.exception("命令 %s 失败", cmd)
-                self._reply(f"出错了：<code>{html.escape(str(exc)[:300])}</code>")
+                self._reply(f"出错了：<code>{html.escape(redact(str(exc))[:300])}</code>")
                 return
+            finally:
+                done.set()
             self._reply(answer)
         else:
             self._reply(f"未知命令 {html.escape(cmd)}。发 /help 看可用命令。")

@@ -136,3 +136,34 @@ def test_history_limit_respected(tmp_path):
 def test_strip_tags():
     from ta.bot import _strip_tags
     assert _strip_tags("<b>粗</b>体 <code>x</code>") == "粗体 x"
+
+
+def test_typing_heartbeat_repeats(bot, monkeypatch):
+    """Telegram 的输入提示只维持约 5 秒，而带联网搜索的问答要 40 秒以上。
+    不续发的话提示早消失，用户会以为 bot 挂了。"""
+    import threading
+    import time
+
+    ticks = []
+    monkeypatch.setattr(type(bot), "_typing", lambda self: ticks.append(1))
+    done = threading.Event()
+    thread = bot._typing_until(done)
+    time.sleep(0.05)
+    assert len(ticks) >= 1          # 立即发一次，不等第一个间隔
+    done.set()
+    thread.join(timeout=6)
+    assert not thread.is_alive()    # 置位后必须退出，不能留下僵尸线程
+
+
+def test_error_message_is_redacted(bot, monkeypatch):
+    """异常消息可能带着含密钥的 URL，不能原样发到 Telegram。"""
+    import ta.bot as B
+
+    def boom(q, h=None):
+        raise RuntimeError("failed: https://api.example.com/x?api_key=SUPERSECRETVALUE123")
+    monkeypatch.setattr(B, "ask", boom)
+    monkeypatch.setattr(B, "redact", lambda s: str(s).replace("SUPERSECRETVALUE123", "<KEY>"))
+    bot.handle(msg("问题"))
+    assert "SUPERSECRETVALUE123" not in bot.sent[0]
+    #  先脱敏再 HTML 转义，占位符因此显示为实体，Telegram 渲染回 <KEY>
+    assert "&lt;KEY&gt;" in bot.sent[0]
