@@ -13,6 +13,7 @@
 | 宏观日历 | FOMC 会议、CPI / 非农 / PCE 等发布日程 |
 | 财报日程 | watchlist 各股财报日期与分析师预期 |
 | 网页看板 | 概览表 + 个股详情（价格/均线/RSI 图表） |
+| Telegram 问答 | 直接向 bot 提问，Claude 调工具查实时数据后作答 |
 | 命令行 | `./ta.sh scan` 直接看技术面状态表 |
 
 ## 快速开始
@@ -26,7 +27,7 @@ python3 scripts/get_chat_id.py        # 取 Telegram chat_id
 
 ./ta.sh scan                          # 命令行扫描
 ./ta.sh web                           # 看板 http://127.0.0.1:8787
-python3 scripts/install_launchd.py --install   # 装定时任务（macOS）
+python3 scripts/install_launchd.py --install   # 装定时任务 + 常驻 bot（macOS）
 ```
 
 ## 需要的凭据
@@ -36,7 +37,7 @@ python3 scripts/install_launchd.py --install   # 装定时任务（macOS）
 - `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET` — [alpaca.markets](https://alpaca.markets) Paper 账户即可
 - `TELEGRAM_BOT_TOKEN` — 向 [@BotFather](https://t.me/BotFather) 发 `/newbot` 获取
 - `TELEGRAM_CHAT_ID` — 先给 bot 发一条消息，再跑 `scripts/get_chat_id.py`
-- `ANTHROPIC_API_KEY` — 供后续的报告撰写功能使用
+- `ANTHROPIC_API_KEY` — Telegram 问答功能使用
 - `FRED_API_KEY`（可选）— [免费申请](https://fredaccount.stlouisfed.org/apikey)。
   配了就用美联储官方的经济发布日历（CPI / PPI / PCE / 非农 / 零售 / GDP），
   不配则退回 Nasdaq 的公开接口 —— 后者较远的未来日期填充不全。
@@ -85,6 +86,22 @@ watchlists:
 
 同一标的同一档位每个交易日只推送一次（去重记录在 SQLite），但升档会再推。
 
+## Telegram 问答
+
+`ta/bot.py` 长轮询接收消息（这台机器在 NAT 后面，webhook 需要域名和端口转发，
+长轮询不需要任何暴露），交给 `ta/chat.py` 用 Claude 回答。
+
+**只响应 `config/.env` 里配置的那个 `TELEGRAM_CHAT_ID`。** bot 用户名是公开可搜的，
+不加这道门，陌生人的提问会消耗你的 API 额度，还能通过工具读到你的持仓。
+对未授权的 chat 完全静默 —— 回一句"无权访问"等于确认 bot 存在。
+
+数据以**工具**形式提供给模型，而非一次性塞进 prompt：全量塞入每轮要几万 token，
+且模型看到的永远是快照；做成工具则问哪只查哪只，回答里的数字必定来自实时接口。
+模型被明确要求不依赖自身记忆陈述公司近况或股价 —— 训练数据有截止日期。
+
+对话历史只保存纯文本，不保存 thinking 与 tool_use 块：跨轮重放会让上下文迅速膨胀，
+而模型下一轮本来就会按需重新调用工具。
+
 ## 项目结构
 
 ```
@@ -98,6 +115,10 @@ ta/
 ├── notify/          Telegram 推送
 ├── store.py         SQLite 持久化
 ├── jobs.py          定时任务入口
+├── chat.py          问答工具集与 Claude 调用
+├── bot.py           Telegram 长轮询循环
+├── macro.py         FOMC 与宏观日历
+├── earnings.py      财报日程
 ├── cli.py           命令行
 └── web/             FastAPI 看板 + 服务端 SVG 图表
 ```

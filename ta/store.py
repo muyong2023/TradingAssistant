@@ -35,6 +35,20 @@ CREATE TABLE IF NOT EXISTS scans (
 );
 CREATE INDEX IF NOT EXISTS idx_scans_symbol_ts ON scans(symbol, ts);
 
+CREATE TABLE IF NOT EXISTS chat_history (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    role    TEXT NOT NULL,     -- user / assistant
+    content TEXT NOT NULL,
+    ts      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_history ON chat_history(chat_id, id);
+
+CREATE TABLE IF NOT EXISTS bot_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS alerts (
     day    TEXT NOT NULL,
     symbol TEXT NOT NULL,
@@ -105,3 +119,55 @@ def record_alert(symbol: str, kind: str, tier: str, detail: str = "",
              datetime.now(timezone.utc).isoformat(), detail),
         )
         return cur.rowcount > 0
+
+
+# --------------------------------------------------------------------------
+# 对话历史与 bot 状态
+# --------------------------------------------------------------------------
+
+def append_chat(chat_id: str, role: str, content: str, path: Path | None = None) -> None:
+    with connect(path) as conn:
+        conn.execute(
+            "INSERT INTO chat_history (chat_id, role, content, ts) VALUES (?,?,?,?)",
+            (str(chat_id), role, content, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def load_chat(chat_id: str, limit: int = 12, path: Path | None = None) -> list[dict]:
+    """取最近若干轮对话。
+
+    只存纯文本，不存 thinking 与 tool_use 块 —— 那些跨轮重放会让历史
+    迅速膨胀，且模型下一轮本来就会按需重新调用工具。
+    """
+    with connect(path) as conn:
+        rows = conn.execute(
+            "SELECT role, content FROM chat_history WHERE chat_id=?"
+            " ORDER BY id DESC LIMIT ?",
+            (str(chat_id), limit),
+        ).fetchall()
+    history = [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+    #  首条必须是 user，否则接口报错
+    while history and history[0]["role"] != "user":
+        history.pop(0)
+    return history
+
+
+def clear_chat(chat_id: str, path: Path | None = None) -> int:
+    with connect(path) as conn:
+        cur = conn.execute("DELETE FROM chat_history WHERE chat_id=?", (str(chat_id),))
+        return cur.rowcount
+
+
+def get_state(key: str, default: str = "", path: Path | None = None) -> str:
+    with connect(path) as conn:
+        row = conn.execute("SELECT value FROM bot_state WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_state(key: str, value: str, path: Path | None = None) -> None:
+    with connect(path) as conn:
+        conn.execute(
+            "INSERT INTO bot_state (key, value) VALUES (?,?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, str(value)),
+        )

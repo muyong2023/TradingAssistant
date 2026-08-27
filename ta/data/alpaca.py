@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 
 import requests
 
-from ta.config import secrets
+from ta.config import redact, secrets
 from ta.data.base import Bar, DataError, Quote
 
 DATA_URL = "https://data.alpaca.markets"
@@ -36,7 +36,7 @@ class AlpacaProvider:
         try:
             resp = self._session.get(f"{base}{path}", params=params, timeout=TIMEOUT)
         except requests.RequestException as exc:
-            raise DataError(f"alpaca 请求失败 {path}: {exc}") from exc
+            raise DataError(f"alpaca 请求失败 {path}: {redact(exc)}") from exc
         if resp.status_code != 200:
             raise DataError(f"alpaca {path} 返回 {resp.status_code}: {resp.text[:200]}")
         return resp.json()

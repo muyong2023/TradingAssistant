@@ -55,11 +55,27 @@ def interval_job(job: str, seconds: int) -> dict:
     }
 
 
+def daemon_job(job: str, module: str) -> dict:
+    """常驻进程。KeepAlive 让 launchd 在它退出后自动拉起。"""
+    return {
+        "Label": f"{PREFIX}.{job}",
+        "ProgramArguments": [str(PYTHON), "-m", module],
+        "WorkingDirectory": str(ROOT),
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        #  崩溃立刻重启会打爆日志；给 10 秒退避
+        "ThrottleInterval": 10,
+        "StandardOutPath": str(LOGS / f"{job}.log"),
+        "StandardErrorPath": str(LOGS / f"{job}.err.log"),
+    }
+
+
 def build() -> dict[str, dict]:
     return {
         "premarket": calendar_job("premarket", 9, 0),
         "intraday": interval_job("intraday", 300),
         "postclose": calendar_job("postclose", 16, 15),
+        "bot": daemon_job("bot", "ta.bot"),
     }
 
 
@@ -115,7 +131,9 @@ def remove() -> int:
 def show() -> int:
     for job, data in build().items():
         print(f"\n--- {job} ---")
-        if "StartInterval" in data:
+        if data.get("KeepAlive"):
+            print("  常驻运行，退出后自动重启")
+        elif "StartInterval" in data:
             print(f"  每 {data['StartInterval']} 秒运行一次（任务内部判断交易时段）")
         else:
             iv = data["StartCalendarInterval"][0]

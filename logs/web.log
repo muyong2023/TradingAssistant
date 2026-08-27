@@ -1,7 +1,0 @@
-INFO:     Started server process [73450]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8787 (Press CTRL+C to quit)
-INFO:     127.0.0.1:63946 - "GET /s/NVDA HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63958 - "GET /s/NVDA HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63959 - "GET / HTTP/1.1" 200 OK

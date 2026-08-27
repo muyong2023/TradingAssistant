@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from ta.config import secrets
+from ta.config import redact, secrets
 from ta.data.base import DataError
 
 NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
@@ -93,7 +93,7 @@ class AlpacaNews:
             try:
                 resp = self._session.get(NEWS_URL, params=params, timeout=TIMEOUT)
             except requests.RequestException as exc:
-                raise DataError(f"新闻请求失败: {exc}") from exc
+                raise DataError(f"新闻请求失败: {redact(exc)}") from exc
             if resp.status_code != 200:
                 raise DataError(f"新闻接口返回 {resp.status_code}: {resp.text[:200]}")
             payload = resp.json()

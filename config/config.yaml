@@ -102,6 +102,10 @@ earnings:
   # 晨报里展示未来几天的财报日程
   lookahead_days: 14
 
+chat:
+  # Telegram 对话保留的历史条数（用户+助手各算一条）
+  history_turns: 12
+
 llm:
   model: claude-opus-5
   # 晨报和盘后报告由 Claude 撰写；关掉则退化为纯指标模板

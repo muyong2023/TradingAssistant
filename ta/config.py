@@ -60,6 +60,20 @@ def secrets() -> Secrets:
     )
 
 
+def redact(text: Any) -> str:
+    """把文本里出现的任何已配置凭据替换成占位符。
+
+    异常消息经常带着完整 URL，而 FRED 这类接口把 api_key 放在查询
+    参数里 —— requests 的 raise_for_status() 会把整条 URL 写进异常，
+    直接 log 出来就等于把密钥明文落盘。所有对外部错误的日志都要过这一道。
+    """
+    out = str(text)
+    for name, value in secrets().__dict__.items():
+        if value and len(value) > 8:
+            out = out.replace(value, f"<{name.upper()}>")
+    return out
+
+
 @lru_cache(maxsize=1)
 def config() -> dict[str, Any]:
     return yaml.safe_load(CONFIG_PATH.read_text())

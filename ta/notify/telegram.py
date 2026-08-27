@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import requests
 
-from ta.config import secrets
+from ta.config import redact, secrets
 
 API = "https://api.telegram.org"
 LIMIT = 4096
@@ -80,7 +80,7 @@ class Telegram:
                 resp = self.session.post(url, data=data, files=files, timeout=TIMEOUT)
             except requests.RequestException as exc:
                 if attempt == MAX_RETRIES:
-                    raise TelegramError(f"{method} 网络失败: {exc}") from exc
+                    raise TelegramError(f"{method} 网络失败: {redact(exc)}") from exc
                 time.sleep(delay)
                 delay *= 2
                 continue
@@ -105,7 +105,7 @@ class Telegram:
                 continue
 
             # 4xx（除 429）是请求本身有问题，重试没有意义
-            raise TelegramError(f"{method} 返回 {resp.status_code}: {resp.text[:300]}")
+            raise TelegramError(f"{method} 返回 {resp.status_code}: {redact(resp.text[:300])}")
         raise TelegramError(f"{method} 重试耗尽")
 
     def send(self, text: str, silent: bool = False) -> int:
