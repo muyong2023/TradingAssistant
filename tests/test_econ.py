@@ -1,6 +1,8 @@
 """经济日历测试。"""
 from datetime import date, time
 
+import pytest
+
 from ta.data.econ import EconEvent, _clean, _match, _parse_time
 
 
@@ -130,3 +132,45 @@ def test_corrupt_cache_is_ignored(tmp_path, monkeypatch):
     path.write_text("{ 坏掉的")
     monkeypatch.setattr(econ, "CACHE_PATH", path)
     assert econ._cache_get("k") is None
+
+
+def test_matches_jackson_hole():
+    """Jackson Hole 年会历来是政策转向的场合，必须进日历。"""
+    assert _match("Jackson Hole Symposium") == ("Jackson Hole 年会", "联储")
+
+
+@pytest.mark.parametrize("raw,speaker", [
+    ("Fed Governor Warsh Speaks", "Warsh"),
+    ("FOMC Member Barkin Speaks", "Barkin"),
+    ("Fed Chair Powell Speaks", "Powell"),
+    ("Fed Vice Chair Jefferson Speaks", "Jefferson"),
+    ("Federal Reserve President Logan Speaks", "Logan"),
+])
+def test_matches_fed_speeches_with_speaker_name(raw, speaker):
+    """保留讲话人姓名：主席与地方联储行长的分量差很多，
+    只显示"某位官员讲话"等于没说。"""
+    label, category = _match(raw)
+    assert label == f"联储讲话·{speaker}"
+    assert category == "联储"
+
+
+def test_speech_pattern_not_broken_by_fomc_filter():
+    """曾经的 bug：为避免与美联储官网重复，过滤了含 FOMC 的条目，
+    "FOMC Member Barkin Speaks" 因此被误伤，联储讲话全部消失。"""
+    from ta.data.econ import _FED_DECISION
+    assert not _FED_DECISION.search("FOMC Member Barkin Speaks")
+    assert not _FED_DECISION.search("Fed Governor Warsh Speaks")
+    assert _FED_DECISION.search("Fed Interest Rate Decision")
+    assert _FED_DECISION.search("FOMC Statement")
+
+
+@pytest.mark.parametrize("noise", [
+    "Atlanta Fed GDPNow",
+    "KC Fed Manufacturing Index",
+    "Fed's Balance Sheet",
+    "Dallas Fed PCE",
+    "Reserve Balances with Federal Reserve Banks",
+])
+def test_fed_noise_still_excluded(noise):
+    """带 Fed 字样但不是讲话也不是决议的常规指标，不该进日历。"""
+    assert _match(noise) is None

@@ -70,3 +70,33 @@ def test_empty_digest_does_not_crash():
     empty = Digest(rows=[], benchmarks=[])
     assert premarket_report(empty)
     assert postclose_report(empty)
+
+
+def test_lookahead_skips_events_already_in_window():
+    """非农已在窗口里出现，底下不该再来一条"下次非农"。"""
+    from datetime import date, time
+
+    from ta.macro import MacroEvent
+    from ta.reports import format_calendar
+
+    today = date(2026, 8, 28)
+    window = [MacroEvent(date(2026, 9, 4), "非农就业", category="就业", at=time(8, 30))]
+    lookahead = [
+        MacroEvent(date(2026, 10, 2), "非农就业", category="就业", at=time(8, 30)),
+        MacroEvent(date(2026, 9, 11), "CPI", category="通胀", at=time(8, 30)),
+    ]
+    text = "\n".join(format_calendar(window, today, None, lookahead))
+    assert "下次 CPI" in text
+    assert "下次 非农就业" not in text
+
+
+def test_lookahead_shown_when_not_in_window():
+    from datetime import date, time
+
+    from ta.macro import MacroEvent
+    from ta.reports import format_calendar
+
+    text = "\n".join(format_calendar(
+        [], date(2026, 8, 28), None,
+        [MacroEvent(date(2026, 9, 11), "CPI", category="通胀", at=time(8, 30))]))
+    assert "下次 CPI" in text

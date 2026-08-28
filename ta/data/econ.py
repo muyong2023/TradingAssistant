@@ -57,8 +57,20 @@ WANTED = [
     ("消费者信心", re.compile(r"^(CB )?Consumer Confidence|Michigan Consumer Sentiment", re.I), "信心"),
 ]
 
-#  联储相关一律走美联储官网，避免与 Nasdaq 的错误日期冲突
-_FED = re.compile(r"Fed Interest Rate|FOMC|Fed Funds", re.I)
+#  只把"利率决议"交给美联储官网（ta/macro.py），避免同一事件两个来源。
+#  先前这里写成 `Fed Interest Rate|FOMC|Fed Funds`，"FOMC Member Barkin
+#  Speaks" 含 FOMC 而被误伤，联储官员讲话因此全部消失 ——
+#  Jackson Hole 期间的主席讲话往往比当期数据更能左右市场。
+_FED_DECISION = re.compile(r"Fed Interest Rate Decision|Fed Funds Rate|FOMC Statement", re.I)
+
+#  联储官员讲话。保留讲话人姓名 —— 主席与地方联储行长的分量差很多，
+#  只显示"某位官员讲话"等于没说。
+_SPEECH = re.compile(
+    r"(?:FOMC Member|Fed(?:eral Reserve)?\s+(?:Governor|Chair(?:man)?|"
+    r"Vice\s+Chair|President))\s+([A-Z][A-Za-z'\u2019-]+)\s+Speaks", re.I)
+
+#  Jackson Hole 全球央行年会，一年一次、连开数日，历来是政策转向的场合
+_SYMPOSIUM = re.compile(r"Jackson Hole", re.I)
 
 
 @dataclass(frozen=True)
@@ -114,6 +126,11 @@ def _clean(text: str) -> str:
 
 
 def _match(name: str) -> tuple[str, str] | None:
+    if _SYMPOSIUM.search(name):
+        return "Jackson Hole 年会", "联储"
+    speech = _SPEECH.search(name)
+    if speech:
+        return f"联储讲话·{speech.group(1)}", "联储"
     for label, pattern, category in WANTED:
         if pattern.search(name):
             return label, category
@@ -148,8 +165,8 @@ def fetch_nasdaq(day: date, use_cache: bool = True) -> list[EconEvent]:
         if row.get("country") != "United States":
             continue
         name = _clean(row.get("eventName", ""))
-        if _FED.search(name):
-            continue
+        if _FED_DECISION.search(name):
+            continue          # 利率决议以美联储官网为准
         hit = _match(name)
         if not hit:
             continue

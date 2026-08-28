@@ -144,7 +144,10 @@ def format_calendar(events: list[MacroEvent], today,
     tail: list[MacroEvent] = []
     if fomc and not any(e.day == fomc.day and "FOMC" in e.name for e in events):
         tail.append(fomc)
-    tail += [e for e in (lookahead or []) if e.day not in {x.day for x in events}]
+    #  按事件名去重而非按日期：非农已在窗口里出现过 9/4，
+    #  底下再来一条"下次非农 10-02"纯属噪音
+    in_window = {x.name for x in events}
+    tail += [e for e in (lookahead or []) if e.name not in in_window]
 
     for e in sorted(tail, key=lambda x: x.day):
         days = (e.day - today).days
