@@ -167,6 +167,27 @@ def job_intraday(dry_run: bool = False, force: bool = False,
         if not _is_trading_day(router):
             log.info("今天非交易日，跳过")
             return 0
+    return _run_rsi_check(router, dry_run=dry_run, summary=summary)
+
+
+def job_check(dry_run: bool = False, force: bool = False) -> int:
+    """定点巡检：无论有无信号都回报一次。
+
+    与 intraday 的区别在于把关方式：这里不看是否在交易时段
+    （7:00 的盘前巡检本来就在开盘前），但仍然跳过非交易日 ——
+    周末和假日推一条"一切正常"只是噪音。
+    """
+    if not _job_enabled("check") and not force:
+        log.debug("check 已在配置中关闭")
+        return 0
+    router = DataRouter()
+    if not force and not _is_trading_day(router):
+        log.info("今天非交易日，跳过巡检")
+        return 0
+    return _run_rsi_check(router, dry_run=dry_run, summary=True)
+
+
+def _run_rsi_check(router: DataRouter, dry_run: bool, summary: bool) -> int:
     store.init_db()
     digest = _collect(router, all_symbols())
 
@@ -214,6 +235,11 @@ def _no_signal_report(daily: dict, intraday: dict) -> str:
 
     lines = [f"<b>✅ RSI 检查完成</b>  {now_et().strftime('%m-%d %H:%M ET')}",
              f"<i>无标的触及 {low} / {high}</i>", ""]
+    if not is_market_hours():
+        #  盘前盘后的分钟线是上一交易时段的收尾，不是实时读数，
+        #  不标出来容易被误读成当下的盘中状态
+        lines.append(f"<i>当前休市，{label}线读数为上一交易时段收尾</i>")
+        lines.append("")
 
     for name, values in ((f"日线", daily), (f"{label}线", intraday)):
         if not values:
@@ -274,6 +300,7 @@ def _deliver(text: str, dry_run: bool, label: str) -> int:
 
 
 JOBS = {
+    "check": lambda a: job_check(a.dry_run, a.force),
     "premarket": lambda a: job_premarket(a.dry_run),
     "postclose": lambda a: job_postclose(a.dry_run),
     "intraday": lambda a: job_intraday(a.dry_run, a.force, a.summary),

@@ -7,6 +7,15 @@ jobs:
   postclose: false      # 盘后复盘，2026-09-03 关闭
   intraday: true        # RSI 告警——当前的核心功能
   web: true             # 本地看板 http://127.0.0.1:8787
+  check: true           # 定点巡检——无论有无信号都回报一次
+
+# 定点巡检的时刻（ET，仅交易日）。改完需重装定时任务：
+#   python3 scripts/install_launchd.py --install
+checkpoints:
+  - "07:00"   # 盘前（分钟线读数为上一交易时段收尾）
+  - "09:30"   # 开盘
+  - "12:00"   # 午间
+  - "14:00"   # 尾盘前
 
 market:
   timezone: America/New_York

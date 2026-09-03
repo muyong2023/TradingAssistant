@@ -140,3 +140,59 @@ def test_summary_mode_does_not_consume_dedupe(db, monkeypatch):
     assert sent == ["无信号回报"]
     with store.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0] == 0
+
+
+def test_check_job_runs_outside_market_hours(db, monkeypatch):
+    """07:00 的盘前巡检本来就在开盘前，不能被交易时段判断挡住。"""
+    import ta.jobs as J
+    from ta.reports import Digest
+
+    monkeypatch.setattr(J, "is_market_hours", lambda at=None: False)
+    monkeypatch.setattr(J, "_is_trading_day", lambda router, day=None: True)
+    monkeypatch.setattr(J, "_collect", lambda router, syms: Digest(rows=[], benchmarks=[]))
+    monkeypatch.setattr(J, "_intraday_rsi_alerts", lambda syms: ([], {}))
+    sent = []
+    monkeypatch.setattr(J, "_deliver", lambda text, dry, label: sent.append(label) or 0)
+
+    assert J.job_check() == 0
+    assert sent == ["无信号回报"]
+
+
+def test_check_job_skips_non_trading_days(db, monkeypatch):
+    """周末和假日推一条"一切正常"只是噪音。"""
+    import ta.jobs as J
+
+    monkeypatch.setattr(J, "_is_trading_day", lambda router, day=None: False)
+    sent = []
+    monkeypatch.setattr(J, "_deliver", lambda text, dry, label: sent.append(label) or 0)
+    assert J.job_check() == 0
+    assert sent == []
+
+
+def test_check_job_respects_switch(db, monkeypatch, isolated_config):
+    import re
+
+    import ta.jobs as J
+    from ta import config as C
+
+    text = isolated_config.read_text()
+    isolated_config.write_text(
+        re.sub(r"^(\s+check:\s*)true\b", r"\1false", text, flags=re.M))
+    C.config.cache_clear()
+
+    sent = []
+    monkeypatch.setattr(J, "_deliver", lambda text, dry, label: sent.append(label) or 0)
+    assert J.job_check() == 0
+    assert sent == []
+
+
+def test_report_flags_stale_intraday_when_closed(monkeypatch):
+    """休市时分钟线读数是上一时段收尾，不标出来会被误读成实时。"""
+    import ta.jobs as J
+
+    monkeypatch.setattr(J, "is_market_hours", lambda at=None: False)
+    text = J._no_signal_report({"NVDA": 58.0}, {"NVDA": 44.0})
+    assert "上一交易时段收尾" in text
+
+    monkeypatch.setattr(J, "is_market_hours", lambda at=None: True)
+    assert "上一交易时段收尾" not in J._no_signal_report({"NVDA": 58.0}, {"NVDA": 44.0})

@@ -15,6 +15,7 @@ import plistlib
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +111,38 @@ def web_job() -> dict:
     }
 
 
+def checkpoints() -> list[tuple[int, int]]:
+    """从 config.yaml 读巡检时刻。手写解析，理由同 enabled_jobs()。"""
+    try:
+        text = (ROOT / "config" / "config.yaml").read_text()
+    except OSError:
+        return []
+    block = re.search(r"^checkpoints:\s*$(.*?)^\S", text, re.M | re.S)
+    if not block:
+        return []
+    out = []
+    for hh, mm in re.findall(r'^\s*-\s*"?(\d{1,2}):(\d{2})"?',
+                             block.group(1), re.M):
+        out.append((int(hh), int(mm)))
+    return out
+
+
+def multi_calendar_job(job: str, times: list[tuple[int, int]]) -> dict:
+    """一个任务、多个触发时刻。"""
+    return {
+        "Label": f"{PREFIX}.{job}",
+        "ProgramArguments": [str(PYTHON), "-m", "ta.jobs", job],
+        "WorkingDirectory": str(ROOT),
+        "StartCalendarInterval": [
+            {"Weekday": d, "Hour": h, "Minute": m}
+            for d in WEEKDAYS for h, m in times
+        ],
+        "StandardOutPath": str(LOGS / f"{job}.log"),
+        "StandardErrorPath": str(LOGS / f"{job}.err.log"),
+        "RunAtLoad": False,
+    }
+
+
 def build() -> dict[str, dict]:
     flags = enabled_jobs()
     all_jobs = {
@@ -119,6 +152,7 @@ def build() -> dict[str, dict]:
         #  bot 常驻：即便问答关闭，它仍要接 /add /remove /list 等命令
         "bot": daemon_job("bot", "ta.bot"),
         "web": web_job(),
+        "check": multi_calendar_job("check", checkpoints()),
     }
     return {name: spec for name, spec in all_jobs.items()
             if flags.get(name, True)}
@@ -145,6 +179,22 @@ def domain() -> str:
     return f"gui/{os.getuid()}"
 
 
+def _wait_gone(label: str, timeout: float = 8.0) -> bool:
+    """等到服务真正从 launchd 消失。
+
+    bootout 是异步的：常驻任务（KeepAlive）的进程需要时间退出，
+    此时立刻 bootstrap 会撞上 "Bootstrap failed: 5: Input/output error"。
+    实测重装 bot 与 web 时必然复现。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        code, _ = launchctl("print", f"{domain()}/{label}")
+        if code != 0:
+            return True
+        time.sleep(0.3)
+    return False
+
+
 def install() -> int:
     if not PYTHON.exists():
         sys.exit(f"找不到 {PYTHON} —— 先建好 venv")
@@ -152,8 +202,13 @@ def install() -> int:
     failed = False
     for path in paths:
         label = path.stem
-        launchctl("bootout", f"{domain()}/{label}")      # 先卸载旧的，忽略失败
+        launchctl("bootout", f"{domain()}/{label}")
+        _wait_gone(label)
         code, out = launchctl("bootstrap", domain(), str(path))
+        if code != 0:
+            #  偶发竞态：再等一轮重试一次
+            _wait_gone(label)
+            code, out = launchctl("bootstrap", domain(), str(path))
         if code == 0:
             print(f"  ✓ {label}")
         else:
@@ -164,7 +219,7 @@ def install() -> int:
 
 def remove() -> int:
     #  卸载时不看开关，把所有可能装过的都清掉
-    for job in ("premarket", "intraday", "postclose", "bot", "web"):
+    for job in ("premarket", "intraday", "postclose", "bot", "web", "check"):
         label = f"{PREFIX}.{job}"
         launchctl("bootout", f"{domain()}/{label}")
         path = AGENTS / f"{label}.plist"
@@ -183,6 +238,10 @@ def show() -> int:
         print(f"\n--- {job} ---")
         if data.get("KeepAlive"):
             print("  常驻运行，退出后自动重启")
+        elif len(data.get("StartCalendarInterval", [])) > len(WEEKDAYS):
+            times = sorted({(i["Hour"], i["Minute"])
+                            for i in data["StartCalendarInterval"]})
+            print("  周一至周五 " + "、".join(f"{h:02d}:{m:02d}" for h, m in times))
         elif "StartInterval" in data:
             print(f"  每 {data['StartInterval']} 秒运行一次（任务内部判断交易时段）")
         else:
