@@ -250,3 +250,19 @@ def test_progress_callback_failure_does_not_break_answer(bot, monkeypatch):
                         lambda self, mid, text: (_ for _ in ()).throw(RuntimeError("boom")))
     bot.handle(msg("问题"))
     assert "回答" in bot.sent          # 编辑全失败 -> 退回发送
+
+
+def test_conflict_gives_actionable_message(bot, monkeypatch, caplog):
+    """两台机器用同一 token 时 Telegram 返回 409。
+    含糊的警告每 5 秒刷一条帮不上忙，要说清怎么办。"""
+    import logging
+
+    class Resp:
+        status_code = 409
+        text = "Conflict: terminated by other getUpdates request"
+
+    monkeypatch.setattr(bot.session, "get", lambda *a, **k: Resp())
+    monkeypatch.setattr("ta.bot.time.sleep", lambda s: None)
+    with caplog.at_level(logging.ERROR):
+        assert bot._get_updates(0) == []
+    assert "同一个 bot token" in caplog.text

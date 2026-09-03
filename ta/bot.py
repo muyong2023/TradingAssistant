@@ -102,8 +102,17 @@ class Bot:
             log.warning("getUpdates 失败：%s", exc)
             time.sleep(5)
             return []
+        if resp.status_code == 409:
+            #  Telegram 只允许一个进程轮询同一个 token。
+            #  多见于：另一台机器也在跑这个 bot，或旧进程没退干净。
+            log.error("另一个进程正在用同一个 bot token 轮询（HTTP 409）。"
+                      "同一 token 只能有一个实例，请停掉另一处，"
+                      "或给这台机器换一个 bot token。30 秒后重试。")
+            time.sleep(30)
+            return []
         if resp.status_code != 200:
-            log.warning("getUpdates 返回 %s：%s", resp.status_code, resp.text[:200])
+            log.warning("getUpdates 返回 %s：%s", resp.status_code,
+                        redact(resp.text[:200]))
             time.sleep(5)
             return []
         payload = resp.json()

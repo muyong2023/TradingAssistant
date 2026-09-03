@@ -4,10 +4,17 @@ pandas>=2.2
 numpy>=1.26
 yfinance>=0.2.50
 requests>=2.32
+
+# 网页看板
 fastapi>=0.115
 uvicorn[standard]>=0.30
 jinja2>=3.1
-
-# 开发
-pytest>=8.0
 python-multipart>=0.0.9
+
+# Telegram 问答（config.yaml 里 chat.enabled 关闭时不会被调用，
+# 但 ta/chat.py 在导入期就需要它，故仍是必装项）
+anthropic>=1.0
+
+# 开发与测试
+pytest>=8.0
+httpx2>=0.1          # starlette 的 TestClient 依赖它

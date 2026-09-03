@@ -18,19 +18,58 @@
 | Telegram 问答 | 直接向 bot 提问，Claude 调工具查实时数据、联网搜索后作答 |
 | 命令行 | `./ta.sh scan` 直接看技术面状态表 |
 
-## 快速开始
+## 在一台新机器上跑起来
+
+macOS，需要 Python 3.11+（开发环境为 3.14）。
 
 ```bash
+git clone https://github.com/muyong2023/TradingAssistant.git
+cd TradingAssistant
+
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-cp config/.env.example config/.env    # 填入四把 key
-python3 scripts/get_chat_id.py        # 取 Telegram chat_id
+bash scripts/install_hooks.sh          # 装 pre-commit 凭据扫描
 
-./ta.sh scan                          # 命令行扫描
-./ta.sh web                           # 看板 http://127.0.0.1:8787
-python3 scripts/install_launchd.py --install   # 装定时任务 + 常驻 bot（macOS）
+cp config/.env.example config/.env     # 填入凭据，见下节
+python3 scripts/get_chat_id.py         # 先给 bot 发条消息，再跑这个取 chat_id
+
+.venv/bin/python -m pytest tests/ -q   # 应当全部通过
+./ta.sh list                           # 自选股（随仓库带过来，无需重配）
+./ta.sh scan                           # 命令行扫一遍
+
+python3 scripts/install_launchd.py --install   # 装定时任务与常驻服务
 ```
+
+装完即生效，无需重启或登出。停掉用 `--remove`。
+
+**自选股不用重新配** —— `config/config.yaml` 在仓库里，克隆下来就是你当前的
+分组和标的。`config/.env`（凭据）和 `data.db`（历史与去重记录）不在仓库里，
+需要新机器上重新填 / 自动重建。
+
+### ⚠️ 同一时间只能有一台机器在跑
+
+Telegram 只允许一个进程轮询同一个 bot token，第二个会收到
+`HTTP 409 Conflict` 而收不到任何消息（bot 日志里会明说）。
+告警去重记录也存在各自的本地 `data.db` 里，两台机器同时跑会**收到重复推送**。
+
+所以迁移到新机器时，先在旧机器上：
+
+```bash
+python3 scripts/install_launchd.py --remove
+```
+
+想两台都跑，就去 @BotFather 再申请一个 bot、在新机器的 `.env` 里换掉 token。
+
+### 时区
+
+代码内部一律用 `America/New_York` 计算交易时段与巡检时刻，与机器本地时区无关。
+机器设成任何时区都不影响推送时间。
+
+### 机器休眠
+
+launchd 在唤醒后会补跑错过的定时任务，时间会晚。要准点收到 07:00 的巡检，
+Mac mini 需保持唤醒（系统设置里关掉睡眠，或接电源常开）。
 
 ## 需要的凭据
 
