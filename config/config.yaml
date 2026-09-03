@@ -1,6 +1,12 @@
 # 交易小助手配置
 # 改完不用重启开发中的进程，定时任务下次运行时自动生效。
 
+# 定时任务开关。关掉的任务 launchd 仍会按时唤醒，但进程立刻退出。
+jobs:
+  premarket: false      # 盘前简报，2026-09-03 关闭
+  postclose: false      # 盘后复盘，2026-09-03 关闭
+  intraday: true        # RSI 告警——当前的核心功能
+
 market:
   timezone: America/New_York
   # 只在交易日运行；节假日由 Alpaca calendar 接口判定
@@ -51,6 +57,12 @@ indicators:
     period: 14
     oversold: 20
     overbought: 80
+  # 分钟线 RSI —— 与日线独立的一路信号，独立去重、独立成条消息
+  intraday:
+    enabled: true
+    timeframe: 5Min       # Alpaca 的写法：1Min / 5Min / 15Min / 1Hour
+    label: "5 分钟"        # 消息里怎么称呼它
+    lookback_days: 5      # 回溯几天的分钟线（RSI(14) 只需十几根，多取是为跨日连续）
   volume:
     # 当日量 / 过去 N 日均量，超过 ratio 视为放量
     lookback: 20
@@ -60,7 +72,10 @@ alerts:
   # 同一标的、同一档位，每个交易日只推一次
   dedupe: per_symbol_per_tier_per_day
   rsi_alert: true
-  volume_spike_alert: false   # 先关掉，噪音大，观察一阵再开
+  # 涨跌幅告警。2026-09-03 按需求关闭 —— 目前只关心 RSI 极值。
+  # 想恢复"跌 10%/20% 提醒我"改回 true 即可，阈值仍在各组的 alert.pct。
+  pct_move_alert: false
+  volume_spike_alert: false   # 噪音大，一直没开
 
 data:
   quotes_provider: alpaca      # 实时/分钟线
@@ -69,7 +84,8 @@ data:
   cache_ttl_seconds: 60
 
 news:
-  enabled: true
+  # 关闭：晨报已停用，新闻只在晨报里出现
+  enabled: false
   # 晨报里放几条。区间为上一交易日收盘至今（周一会回溯到上周五）。
   max_items: 10
   # 每只票最多几条，防止 NVDA 这类热门票独占整份晨报
@@ -86,7 +102,8 @@ news:
     - "Stock Moves \\d+% In"
 
 macro:
-  enabled: true
+  # 关闭：晨报已停用
+  enabled: false
   # 晨报里展示未来几天的宏观日程
   lookahead_days: 7
   # FOMC 日期抓自美联储官网（确定）；初请失业金、非农由规则推导。
@@ -98,11 +115,16 @@ macro:
   #  - { date: 2026-09-25, name: "核心 PCE", detail: "联储偏好的通胀指标", time: "08:30" }
 
 earnings:
-  enabled: true
+  # 关闭：晨报已停用
+  enabled: false
   # 晨报里展示未来几天的财报日程
   lookahead_days: 14
 
 chat:
+  # 自由问答（走 Claude API，是本项目唯一消耗 token 的功能）。
+  # 2026-09-03 关闭以省额度。关闭后 bot 仍然接受 /add /remove /list
+  # 等命令——那些是纯本地逻辑，一个 token 都不花。
+  enabled: false
   # Telegram 对话保留的历史条数（用户+助手各算一条）
   history_turns: 12
 

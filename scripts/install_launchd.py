@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import plistlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -70,13 +71,40 @@ def daemon_job(job: str, module: str) -> dict:
     }
 
 
+def enabled_jobs() -> dict[str, bool]:
+    """读 config.yaml 的 jobs 开关。关掉的任务干脆不装 ——
+    装了再让进程每次唤醒后立刻退出是无谓的开销和日志噪音。
+
+    手写解析而不用 PyYAML：这个脚本用系统 python3 运行（不在 venv 里），
+    import yaml 会失败。先前 except 吞掉异常静默返回空表，
+    结果开关形同虚设，已关闭的任务照装不误。
+    """
+    path = ROOT / "config" / "config.yaml"
+    try:
+        text = path.read_text()
+    except OSError:
+        return {}
+    block = re.search(r"^jobs:\s*$(.*?)^\S", text, re.M | re.S)
+    if not block:
+        return {}
+    flags: dict[str, bool] = {}
+    for name, value in re.findall(r"^\s+(\w+):\s*(true|false)\b",
+                                  block.group(1), re.M | re.I):
+        flags[name] = value.lower() == "true"
+    return flags
+
+
 def build() -> dict[str, dict]:
-    return {
+    flags = enabled_jobs()
+    all_jobs = {
         "premarket": calendar_job("premarket", 9, 0),
         "intraday": interval_job("intraday", 300),
         "postclose": calendar_job("postclose", 16, 15),
+        #  bot 常驻：即便问答关闭，它仍要接 /add /remove /list 等命令
         "bot": daemon_job("bot", "ta.bot"),
     }
+    return {name: spec for name, spec in all_jobs.items()
+            if flags.get(name, True)}
 
 
 def write(plists: dict[str, dict]) -> list[Path]:
@@ -118,7 +146,8 @@ def install() -> int:
 
 
 def remove() -> int:
-    for job in build():
+    #  卸载时不看开关，把所有可能装过的都清掉
+    for job in ("premarket", "intraday", "postclose", "bot"):
         label = f"{PREFIX}.{job}"
         launchctl("bootout", f"{domain()}/{label}")
         path = AGENTS / f"{label}.plist"
@@ -129,6 +158,10 @@ def remove() -> int:
 
 
 def show() -> int:
+    flags = enabled_jobs()
+    skipped = [n for n, on in flags.items() if not on]
+    if skipped:
+        print(f"配置中已关闭、不会安装的任务：{', '.join(skipped)}")
     for job, data in build().items():
         print(f"\n--- {job} ---")
         if data.get("KeepAlive"):

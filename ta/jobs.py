@@ -15,13 +15,13 @@ import sys
 from datetime import date
 
 from ta import store
-from ta.alerts import evaluate, filter_new, render
+from ta.alerts import evaluate, evaluate_intraday_rsi, filter_new, render
 from ta.config import all_symbols, config
 from ta.data.base import DataError
 from ta.data.news import AlpacaNews, compile_filters, data_releases, rank
 from ta.data.router import DataRouter
 from ta.earnings import upcoming as earnings_upcoming
-from ta.indicators import compute
+from ta.indicators import compute, rsi
 from ta.macro import next_fomc, next_key_events, upcoming
 from ta.market import is_market_hours, last_session_close, now_et, session_fraction
 from ta.notify.telegram import Telegram
@@ -68,7 +68,16 @@ def _collect(router: DataRouter, symbols: list[str]) -> Digest:
     return Digest(rows=rows, benchmarks=benchmarks)
 
 
+def _job_enabled(name: str) -> bool:
+    """任务开关。关掉的任务 launchd 仍会唤醒，但进程立刻退出——
+    比反复装卸 plist 简单，也不会丢掉调度状态。"""
+    return bool(config().get("jobs", {}).get(name, True))
+
+
 def job_premarket(dry_run: bool = False) -> int:
+    if not _job_enabled("premarket") and not dry_run:
+        log.info("premarket 已在配置中关闭")
+        return 0
     router = DataRouter()
     if not _is_trading_day(router):
         log.info("今天非交易日，跳过晨报")
@@ -131,6 +140,9 @@ def _overnight_news(digest: Digest) -> tuple[list, list]:
 
 
 def job_postclose(dry_run: bool = False) -> int:
+    if not _job_enabled("postclose") and not dry_run:
+        log.info("postclose 已在配置中关闭")
+        return 0
     router = DataRouter()
     if not _is_trading_day(router):
         log.info("今天非交易日，跳过盘后")
@@ -143,6 +155,9 @@ def job_postclose(dry_run: bool = False) -> int:
 
 def job_intraday(dry_run: bool = False, force: bool = False) -> int:
     """盘中轮询。非交易时段直接退出，让 launchd 的固定间隔调度保持简单。"""
+    if not _job_enabled("intraday") and not force:
+        log.debug("intraday 已在配置中关闭")
+        return 0
     router = DataRouter()
     if not force:
         if not is_market_hours():
@@ -154,19 +169,57 @@ def job_intraday(dry_run: bool = False, force: bool = False) -> int:
     store.init_db()
     digest = _collect(router, all_symbols())
 
-    candidates = []
+    #  日线信号
+    daily = []
     for r in digest.rows:
         if r.quote:
-            candidates.extend(evaluate(r.quote, r.snap))
-    fresh = filter_new(candidates) if not dry_run else candidates
+            daily.extend(evaluate(r.quote, r.snap))
 
-    if not fresh:
-        log.info("无新告警（候选 %d 条，均已推送过）", len(candidates))
-        return 0
+    #  分钟线 RSI —— 与日线完全独立的一路信号
+    intraday = _intraday_rsi_alerts([r.symbol for r in digest.rows])
 
-    header = f"<b>⚡ 盘中异动</b>  {now_et().strftime('%H:%M ET')}\n\n"
-    body = header + render(fresh)
-    return _deliver(body, dry_run, label=f"{len(fresh)} 条告警")
+    sent = 0
+    for group, title in ((daily, "日线"), (intraday, "5 分钟线")):
+        fresh = filter_new(group) if not dry_run else group
+        if not fresh:
+            continue
+        #  日线与分钟线分成两条消息推送：时间尺度不同，混在一起
+        #  容易把短线噪音当成趋势信号
+        header = (f"<b>⚡ {title}信号</b>  {now_et().strftime('%H:%M ET')}\n\n")
+        if _deliver(header + render(fresh), dry_run, label=f"{title} {len(fresh)} 条") == 0:
+            sent += len(fresh)
+
+    if not sent:
+        log.info("无新告警（日线候选 %d、分钟线候选 %d，均已推送过）",
+                 len(daily), len(intraday))
+    return 0
+
+
+def _intraday_rsi_alerts(symbols: list[str]) -> list:
+    """分钟线 RSI 信号。取数失败不影响日线那一路。"""
+    cfg = config()["indicators"].get("intraday", {})
+    if not cfg.get("enabled", True) or not symbols:
+        return []
+    timeframe = str(cfg.get("timeframe", "5Min"))
+    label = str(cfg.get("label", "5 分钟"))
+    period = int(config()["indicators"]["rsi"]["period"])
+    try:
+        from ta.data.alpaca import AlpacaProvider
+        bars = AlpacaProvider().get_intraday_bars(
+            symbols, timeframe=timeframe, days=int(cfg.get("lookback_days", 5)))
+    except Exception as exc:
+        log.warning("分钟线取数失败：%s", exc)
+        return []
+
+    out = []
+    for sym in symbols:
+        series = bars.get(sym) or []
+        if len(series) <= period:
+            continue
+        closes = [b.close for b in series]
+        out.extend(evaluate_intraday_rsi(sym, rsi(closes, period)[-1],
+                                         closes[-1], timeframe=label))
+    return out
 
 
 def _deliver(text: str, dry_run: bool, label: str) -> int:

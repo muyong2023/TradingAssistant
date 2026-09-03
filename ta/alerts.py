@@ -64,7 +64,7 @@ def evaluate(quote: Quote, snap: Snapshot | None) -> list[Alert]:
     change = quote.change_pct
 
     # --- 涨跌幅分档 ---
-    tiers = alert_tiers(quote.symbol)
+    tiers = alert_tiers(quote.symbol) if cfg["alerts"].get("pct_move_alert", True) else []
     hit = [t for t in tiers if abs(change) >= t]
     if hit:
         tier = max(hit)                      # 只报触发的最高档
@@ -136,3 +136,37 @@ def filter_new(alerts: list[Alert], day: date | None = None) -> list[Alert]:
                               detail=alert.headline, day=day):
             fresh.append(alert)
     return fresh
+
+
+# --------------------------------------------------------------------------
+# 分钟线 RSI
+# --------------------------------------------------------------------------
+
+def evaluate_intraday_rsi(symbol: str, rsi_value: float | None, price: float,
+                          timeframe: str = "5分钟") -> list[Alert]:
+    """分钟线 RSI 的超买超卖。
+
+    与日线分开成独立的 kind，因而去重也各自独立 —— 同一只票的日线
+    超卖和 5 分钟超卖是两件事，都值得知道。
+    """
+    if rsi_value is None:
+        return []
+    cfg = config()["indicators"]["rsi"]
+    low, high = cfg["oversold"], cfg["overbought"]
+
+    if rsi_value <= low:
+        beyond, tier, word = low - rsi_value, "oversold", "超卖"
+    elif rsi_value >= high:
+        beyond, tier, word = rsi_value - high, "overbought", "超买"
+    else:
+        return []
+
+    return [Alert(
+        symbol=symbol,
+        kind="rsi_intraday",
+        tier=tier,
+        headline=f"{timeframe} RSI {rsi_value:.1f} {word}   ${price:,.2f}",
+        detail=f"阈值 {low}/{high}  ·  分组 {group_of(symbol)}",
+        severity=2 if beyond >= 5 else 1,
+        magnitude=1.0 + beyond / 20.0,
+    )]

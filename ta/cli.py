@@ -156,6 +156,37 @@ def _fmt_vr(v: float | None, projected: bool) -> str:
     return f"{v:.2f}x" + ("*" if projected else "")
 
 
+def cmd_list(args) -> int:
+    import re
+    from ta import watchlist
+    text = re.sub(r"<[^>]+>", "", watchlist.summary())
+    print(text)
+    return 0
+
+
+def cmd_add(args) -> int:
+    from ta import watchlist
+    from ta.watchlist import WatchlistError
+    group = args.group or list(watchlists())[0]
+    try:
+        print(watchlist.add(args.symbol, group))
+    except WatchlistError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_remove(args) -> int:
+    from ta import watchlist
+    from ta.watchlist import WatchlistError
+    try:
+        print(watchlist.remove(args.symbol))
+    except WatchlistError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ta", description="交易小助手")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -165,6 +196,17 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("-g", "--group", help="只扫某一组")
     scan.add_argument("-v", "--verbose", action="store_true")
     scan.set_defaults(func=cmd_scan)
+
+    sub.add_parser("list", help="列出自选股分组").set_defaults(func=cmd_list)
+
+    add = sub.add_parser("add", help="加入自选股")
+    add.add_argument("symbol")
+    add.add_argument("-g", "--group", help="目标分组，默认第一组")
+    add.set_defaults(func=cmd_add)
+
+    rm = sub.add_parser("remove", help="移除自选股")
+    rm.add_argument("symbol")
+    rm.set_defaults(func=cmd_remove)
 
     args = parser.parse_args(argv)
     logging.basicConfig(

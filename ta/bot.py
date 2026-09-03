@@ -21,8 +21,9 @@ import time
 
 import requests
 
-from ta import store
+from ta import store, watchlist
 from ta.chat import ask
+from ta.watchlist import WatchlistError
 from ta.config import config, redact, secrets
 from ta.market import is_market_hours, now_et
 from ta.notify.telegram import (Telegram, TelegramError, escape,
@@ -37,24 +38,36 @@ OFFSET_KEY = "telegram_offset"
 MAX_QUESTION = 2000
 WAIT_ICON = "⏳"
 
-HELP = """<b>股票助手</b>
+HELP_CORE = """<b>股票助手</b>
 
-直接提问即可，例如：
-· NVDA 现在什么情况
-· 我的持仓今天怎么样
-· 哪只票 RSI 到超买了
-· 这周有什么宏观数据
-· MU 财报什么时候
+<b>自选股</b>
+/list — 查看全部分组与标的
+/add &lt;代码&gt; [分组] — 加入，省略分组则进 {default_group}
+/remove &lt;代码&gt; — 移除
 
-<b>命令</b>
-/scan — 关注列表当日概览
-/news — 最近的相关新闻
-/calendar — 宏观日程与财报
-/clear — 清空对话上下文
-/help — 显示本说明
+<b>信号</b>
+每 5 分钟检查一次，日线与 5 分钟线的 RSI
+低于 {low} 或高于 {high} 时推送，两者分开成条。
 
-回答里的数字都来自实时接口，不是模型的记忆。
-本助手只做分析，不构成投资建议。"""
+/status — 当前配置与运行状态
+/help — 显示本说明"""
+
+HELP_CHAT = """
+
+<b>问答</b>
+直接提问即可，例如「NVDA 现在什么情况」。
+/scan /news /calendar /clear"""
+
+
+def build_help() -> str:
+    cfg = config()
+    rsi_cfg = cfg["indicators"]["rsi"]
+    groups = list(cfg["watchlists"])
+    text = HELP_CORE.format(low=rsi_cfg["oversold"], high=rsi_cfg["overbought"],
+                            default_group=groups[0] if groups else "core")
+    if cfg.get("chat", {}).get("enabled", True):
+        text += HELP_CHAT
+    return text
 
 
 class Bot:
@@ -202,6 +215,12 @@ class Bot:
             self.handle_command(text)
             return
 
+        if not config().get("chat", {}).get("enabled", True):
+            #  问答是唯一花 token 的功能。关闭时直接短回复，绝不调模型。
+            self._reply("问答功能当前已关闭（省 API 额度）。\n"
+                        "可用命令：/list /add /remove /status /help")
+            return
+
         if len(text) > MAX_QUESTION:
             self._reply(f"问题太长了（{len(text)} 字），请精简到 {MAX_QUESTION} 字以内。")
             return
@@ -226,12 +245,28 @@ class Bot:
         self._finish(holder, answer)
 
     def handle_command(self, text: str) -> None:
-        cmd = text.split()[0].lower().lstrip("/").split("@")[0]
+        parts = text.split()
+        cmd = parts[0].lower().lstrip("/").split("@")[0]
+        args = parts[1:]
+
+        #  以下命令全是本地逻辑，不调用任何模型，零 token 开销
         if cmd in ("start", "help"):
-            self._reply(HELP)
+            self._reply(build_help())
+        elif cmd == "list":
+            self._reply(watchlist.summary())
+        elif cmd == "add":
+            self._cmd_add(args)
+        elif cmd == "remove":
+            self._cmd_remove(args)
+        elif cmd == "status":
+            self._reply(self._status())
         elif cmd == "clear":
             n = store.clear_chat(self.allowed)
             self._reply(f"已清空对话上下文（{n} 条）。")
+        elif not config().get("chat", {}).get("enabled", True):
+            self._reply("问答功能当前已关闭（省 API 额度）。\n"
+                        "可用命令见 /help；要开启改 <code>config.yaml</code> 的 "
+                        "<code>chat.enabled</code>。")
         elif cmd in ("scan", "news", "calendar"):
             #  命令走同一条问答链路，保证与自由提问的口径一致
             prompt = {
@@ -253,6 +288,46 @@ class Bot:
             self._finish(holder, answer)
         else:
             self._reply(f"未知命令 {html.escape(cmd)}。发 /help 看可用命令。")
+
+    def _cmd_add(self, args: list[str]) -> None:
+        if not args:
+            self._reply("用法：<code>/add NVDA [分组]</code>\n"
+                        f"可用分组：{', '.join(config()['watchlists'])}")
+            return
+        groups = list(config()["watchlists"])
+        group = args[1] if len(args) > 1 else groups[0]
+        try:
+            self._reply(watchlist.add(args[0], group))
+        except WatchlistError as exc:
+            self._reply(f"{html.escape(str(exc))}")
+
+    def _cmd_remove(self, args: list[str]) -> None:
+        if not args:
+            self._reply("用法：<code>/remove NVDA</code>")
+            return
+        try:
+            self._reply(watchlist.remove(args[0]))
+        except WatchlistError as exc:
+            self._reply(f"{html.escape(str(exc))}")
+
+    def _status(self) -> str:
+        cfg = config()
+        rsi_cfg = cfg["indicators"]["rsi"]
+        intraday = cfg["indicators"].get("intraday", {})
+        total = sum(len(g["symbols"]) for g in cfg["watchlists"].values())
+        jobs = cfg.get("jobs", {})
+        on = lambda v: "开" if v else "关"
+        return (
+            f"<b>运行状态</b>\n"
+            f"自选股 {total} 只 / {len(cfg['watchlists'])} 组\n"
+            f"RSI 阈值 {rsi_cfg['oversold']} / {rsi_cfg['overbought']}\n"
+            f"日线信号 {on(cfg['alerts'].get('rsi_alert', True))}　"
+            f"{intraday.get('label', '分钟')}线信号 {on(intraday.get('enabled'))}\n"
+            f"涨跌幅告警 {on(cfg['alerts'].get('pct_move_alert'))}\n"
+            f"盘中检查 {on(jobs.get('intraday', True))}　"
+            f"晨报 {on(jobs.get('premarket'))}　盘后 {on(jobs.get('postclose'))}\n"
+            f"问答 {on(cfg.get('chat', {}).get('enabled'))}"
+        )
 
     # ---- 主循环 ----
 

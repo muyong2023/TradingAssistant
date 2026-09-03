@@ -7,9 +7,10 @@
 
 | 能力 | 说明 |
 |---|---|
-| 盘前简报 | 交易日 09:00 ET 推送隔夜变动与当日关注点 |
-| 盘中告警 | 09:30–16:00 每 5 分钟检查，触发涨跌幅分档或 RSI 极值时推送 |
-| 盘后复盘 | 16:15 ET 推送领涨领跌与信号变化 |
+| **自选股管理** | Telegram `/add` `/remove` `/list`，或命令行 `./ta.sh add/remove/list` |
+| **RSI 信号** | 09:30–16:00 每 5 分钟检查，**日线**与 **5 分钟线** RSI 触及 20/80 时分别推送 |
+| 盘前简报 | 交易日 09:00 ET 推送隔夜变动与当日关注点（*当前关闭*）|
+| 盘后复盘 | 16:15 ET 推送领涨领跌与信号变化（*当前关闭*）|
 | 宏观日历 | FOMC 会议、CPI / 非农 / PCE 等发布日程 |
 | 财报日程 | watchlist 各股财报日期与分析师预期 |
 | 网页看板 | 概览表 + 个股详情（价格/均线/RSI 图表） |
@@ -69,6 +70,47 @@ python3 scripts/install_launchd.py --install   # 装定时任务 + 常驻 bot（
 `54` 是 Personal Income and Outlays（PCE）而非就业报告，
 `21` 是 H.6 Money Stock Measures 而非零售销售。
 核对方式：`GET /fred/releases`。
+
+## 功能开关
+
+代码全部保留，用 `config/config.yaml` 的开关控制启停。当前只开了自选股管理与
+RSI 信号两项，其余为省 API 额度而关闭：
+
+```yaml
+jobs:
+  premarket: false    # 盘前简报
+  postclose: false    # 盘后复盘
+  intraday: true      # RSI 检查
+
+alerts:
+  rsi_alert: true
+  pct_move_alert: false     # 涨跌幅分档告警
+  volume_spike_alert: false
+
+chat:
+  enabled: false      # 自由问答——本项目唯一消耗 token 的功能
+news:    { enabled: false }
+macro:   { enabled: false }
+earnings: { enabled: false }
+```
+
+关掉问答后 bot 仍然常驻，接受 `/add` `/remove` `/list` `/status` 等命令 ——
+那些是纯本地逻辑，一个 token 都不花。
+
+改完开关后重装定时任务使其生效（安装脚本会跳过已关闭的任务）：
+
+```bash
+python3 scripts/install_launchd.py --install
+```
+
+## 双时间尺度的 RSI
+
+日线与 5 分钟线是**两路独立信号**，独立去重、分别成条推送。实测同一天里
+MSFT 可以日线超买 66.2、同时 5 分钟线超卖 43.9 —— 时间尺度不同，混在一条
+消息里容易把短线噪音当成趋势信号。
+
+5 分钟线取自 Alpaca 免费档的 IEX feed，**过滤掉盘前盘后**：那些 K 线极稀疏
+（实测 NVDA 08:05 那根只有 140 股），几笔零星成交就能把 RSI 拉到极值。
 
 ## 配置
 

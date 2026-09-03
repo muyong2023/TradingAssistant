@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -114,11 +115,66 @@ class AlpacaProvider:
             out[sym] = sorted(out[sym], key=lambda b: b.day)[-lookback_days:]
         return out
 
+    def get_intraday_bars(self, symbols: list[str], timeframe: str = "5Min",
+                          days: int = 5,
+                          regular_hours_only: bool = True) -> dict[str, list[Bar]]:
+        """分钟级 K 线。
+
+        免费档同样走 IEX feed，成交量偏低但价格可用 —— RSI 只吃收盘价，
+        不受量的影响。
+
+        regular_hours_only 默认开启：IEX 会返回盘前盘后的成交，那些
+        K 线极稀疏（实测 NVDA 08:05 那根只有 140 股），几笔零星成交
+        就能把 RSI 拉到极值，产生假信号。
+        """
+        if not symbols:
+            return {}
+        start = (datetime.now(timezone.utc) - timedelta(days=days))
+        out: dict[str, list[Bar]] = {}
+        page_token = None
+        while True:
+            params = {
+                "symbols": ",".join(symbols),
+                "timeframe": timeframe,
+                "start": start.isoformat(),
+                "limit": 10000,
+                "feed": self.feed,
+                "adjustment": "split",
+            }
+            if page_token:
+                params["page_token"] = page_token
+            payload = self._get(DATA_URL, "/v2/stocks/bars", **params)
+            for sym, bars in (payload.get("bars") or {}).items():
+                for b in bars:
+                    ts = _parse_ts(b["t"])
+                    if ts is None:
+                        continue
+                    if regular_hours_only and not _in_regular_session(ts):
+                        continue
+                    out.setdefault(sym, []).append(Bar(
+                        day=ts.date(), open=float(b["o"]), high=float(b["h"]),
+                        low=float(b["l"]), close=float(b["c"]), volume=float(b["v"]),
+                    ))
+            page_token = payload.get("next_page_token")
+            if not page_token:
+                break
+        return out
+
     def is_trading_day(self, day: date) -> bool:
         """问交易日历，自动排除周末和节假日。"""
         iso = day.isoformat()
         days = self._get(TRADING_URL, "/v2/calendar", start=iso, end=iso)
         return any(d.get("date") == iso for d in days)
+
+
+_ET = ZoneInfo("America/New_York")
+_OPEN, _CLOSE = time(9, 30), time(16, 0)
+
+
+def _in_regular_session(ts: datetime) -> bool:
+    """是否落在 09:30–16:00 ET 的正常交易时段。"""
+    local = ts.astimezone(_ET)
+    return local.weekday() < 5 and _OPEN <= local.time() < _CLOSE
 
 
 def _f(v) -> float | None:
