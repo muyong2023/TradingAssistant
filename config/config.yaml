@@ -43,7 +43,7 @@ watchlists:
   growth_ai:
     label: "成长/AI 产业链"
     alert: { pct: [10, 18] }
-    symbols: [PLTR, CBRS, NBIS, COHR, LITE, GLW, SNDK, HOOD, AVGO, ONDS, CRWV, IREN, MRVL, SNOW]
+    symbols: [PLTR, NBIS, COHR, LITE, GLW, HOOD, ONDS, CRWV, IREN, MRVL, SNOW]
 
   high_vol:
     label: "高波动"
@@ -71,7 +71,7 @@ watchlists:
   chip:
     label: "芯片"
     alert: { pct: [10, 20] }
-    symbols: [MU]
+    symbols: [MU, AVGO, SNDK, CBRS]
 
 
 
