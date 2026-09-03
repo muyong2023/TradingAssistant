@@ -24,30 +24,48 @@ watchlists:
   core_mega:
     label: "核心大盘"
     alert: { pct: [7, 12] }
-    symbols: [NVDA, MSFT, GOOGL, AMZN, META, AAPL, TSLA, TSM, AMD, MU]
+    symbols: [NVDA, MSFT, GOOGL, AMZN, META, AAPL, TSLA, TSM, AMD]
 
   defensive:
     label: "消费防御"
     alert: { pct: [5, 9] }
-    symbols: [COST, JNJ, KO, MCD, PEP, PG, WMT]
+    symbols: [COST, JNJ, KO, MCD, PEP, PG, WMT, NKE]
 
   growth_ai:
     label: "成长/AI 产业链"
     alert: { pct: [10, 18] }
-    symbols: [PLTR, CBRS, NBIS, COHR, LITE, GLW, SNDK, HOOD, FIG, AVGO]
+    symbols: [PLTR, CBRS, NBIS, COHR, LITE, GLW, SNDK, HOOD, AVGO, ONDS, CRWV, IREN, MRVL, SNOW]
 
   high_vol:
     label: "高波动"
     alert: { pct: [15, 25] }
-    symbols: [SMR, CEG, IONQ, SPCX, MRNA, LUMN]
+    symbols: [SMR, IONQ, SPCX, MRNA, LUMN, POET, RXRX]
 
   etf:
     label: "ETF / 基准"
     alert: { pct: [3, 6] }
     # 这三只同时用作晨报里的市场基准
-    symbols: [SPY, IGV, GLD, SGOV]
+    symbols: [SPY, IGV, GLD]
     # SGOV 是超短国债 ETF（现金等价物），日波动 <0.1%，
     # 上面的 ±3% 阈值对它形同关闭 —— 它在这里是给看板算现金仓位/收益率用的，不是为了告警。
+
+  electricity:
+    label: "电力"
+    alert: { pct: [10, 20] }
+    symbols: [BE, CEG]
+
+  saas:
+    label: "软件"
+    alert: { pct: [10, 20] }
+    symbols: [FIG, NOW]
+
+  chip:
+    label: "芯片"
+    alert: { pct: [10, 20] }
+    symbols: [MU]
+
+
+
 
 benchmarks: [SPY, IGV, GLD]
 

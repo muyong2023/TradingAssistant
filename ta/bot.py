@@ -53,6 +53,7 @@ HELP_CORE = """<b>股票助手</b>
 每 5 分钟检查一次，日线与 5 分钟线的 RSI
 低于 {low} 或高于 {high} 时推送，两者分开成条。
 
+/check — 立即跑一次 RSI 检查，有无信号都回报
 /status — 当前配置与运行状态
 /help — 显示本说明"""
 
@@ -266,6 +267,8 @@ class Bot:
             self._cmd_newlist(args)
         elif cmd == "dellist":
             self._cmd_dellist(args)
+        elif cmd == "check":
+            self._cmd_check()
         elif cmd == "status":
             self._reply(self._status())
         elif cmd == "clear":
@@ -341,6 +344,23 @@ class Bot:
             self._reply(watchlist.delete_group(args[0], force=force))
         except WatchlistError as exc:
             self._reply(html.escape(str(exc)))
+
+    def _cmd_check(self) -> None:
+        """手动跑一次 RSI 检查，有无信号都回报。
+
+        用 summary 模式：不占当日的去重额度，否则手动查一次
+        会把后面真正的自动告警吞掉。
+        """
+        done = threading.Event()
+        self._typing_until(done)
+        try:
+            from ta.jobs import job_intraday
+            job_intraday(force=True, summary=True)
+        except Exception as exc:
+            log.exception("手动检查失败")
+            self._reply(f"检查失败：<code>{html.escape(redact(str(exc))[:300])}</code>")
+        finally:
+            done.set()
 
     def _status(self) -> str:
         cfg = config()

@@ -104,3 +104,39 @@ def test_pct_move_respects_switch(isolated_config):
         re.sub(r"^(\s+pct_move_alert:\s*)true\b", r"\1false", text, flags=re.M))
     C.config.cache_clear()
     assert not any(a.kind == "pct_move" for a in evaluate(quote, None))
+
+
+def test_summary_mode_reports_when_nothing_triggers(monkeypatch):
+    """只说"没有信号"没法让人确信程序在正常工作，
+    回报里要带扫描范围和 RSI 区间。"""
+    from ta.jobs import _no_signal_report
+    text = _no_signal_report({"NVDA": 58.5, "AVGO": 35.9},
+                             {"AAPL": 34.2, "TSM": 71.9})
+    assert "无标的触及" in text
+    assert "AVGO" in text and "35.9" in text      # 离下沿最近
+    assert "TSM" in text and "71.9" in text       # 离上沿最近
+    assert "2 只" in text
+
+
+def test_summary_report_handles_missing_data():
+    from ta.jobs import _no_signal_report
+    text = _no_signal_report({}, {})
+    assert "无数据" in text
+
+
+def test_summary_mode_does_not_consume_dedupe(db, monkeypatch):
+    """手动查看不该占用当日去重额度，否则会把后面真正的自动告警吞掉。"""
+    import ta.jobs as J
+    from ta.reports import Digest
+
+    monkeypatch.setattr(J, "_is_trading_day", lambda router, day=None: True)
+    monkeypatch.setattr(J, "_collect", lambda router, syms: Digest(rows=[], benchmarks=[]))
+    monkeypatch.setattr(J, "_intraday_rsi_alerts", lambda syms: ([], {}))
+    sent = []
+    monkeypatch.setattr(J, "_deliver",
+                        lambda text, dry, label: sent.append(label) or 0)
+
+    J.job_intraday(force=True, summary=True)
+    assert sent == ["无信号回报"]
+    with store.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0] == 0

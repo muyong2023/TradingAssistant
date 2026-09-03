@@ -153,7 +153,8 @@ def job_postclose(dry_run: bool = False) -> int:
     return _deliver(text, dry_run, label="盘后")
 
 
-def job_intraday(dry_run: bool = False, force: bool = False) -> int:
+def job_intraday(dry_run: bool = False, force: bool = False,
+                 summary: bool = False) -> int:
     """盘中轮询。非交易时段直接退出，让 launchd 的固定间隔调度保持简单。"""
     if not _job_enabled("intraday") and not force:
         log.debug("intraday 已在配置中关闭")
@@ -176,11 +177,13 @@ def job_intraday(dry_run: bool = False, force: bool = False) -> int:
             daily.extend(evaluate(r.quote, r.snap))
 
     #  分钟线 RSI —— 与日线完全独立的一路信号
-    intraday = _intraday_rsi_alerts([r.symbol for r in digest.rows])
+    intraday, intraday_rsi = _intraday_rsi_alerts([r.symbol for r in digest.rows])
 
     sent = 0
     for group, title in ((daily, "日线"), (intraday, "5 分钟线")):
-        fresh = filter_new(group) if not dry_run else group
+        #  summary 模式是人手动触发的一次性查看，不消耗当日的去重额度，
+        #  否则手动查一次会把后面真正的自动告警吞掉
+        fresh = group if (dry_run or summary) else filter_new(group)
         if not fresh:
             continue
         #  日线与分钟线分成两条消息推送：时间尺度不同，混在一起
@@ -189,17 +192,49 @@ def job_intraday(dry_run: bool = False, force: bool = False) -> int:
         if _deliver(header + render(fresh), dry_run, label=f"{title} {len(fresh)} 条") == 0:
             sent += len(fresh)
 
-    if not sent:
+    if summary and not sent:
+        daily_rsi = {r.symbol: r.snap.rsi for r in digest.rows
+                     if r.snap and r.snap.rsi is not None}
+        _deliver(_no_signal_report(daily_rsi, intraday_rsi), dry_run, label="无信号回报")
+    elif not sent:
         log.info("无新告警（日线候选 %d、分钟线候选 %d，均已推送过）",
                  len(daily), len(intraday))
     return 0
 
 
-def _intraday_rsi_alerts(symbols: list[str]) -> list:
-    """分钟线 RSI 信号。取数失败不影响日线那一路。"""
+def _no_signal_report(daily: dict, intraday: dict) -> str:
+    """没有触发时的回报。
+
+    只说一句"没有信号"没法让人确信程序在正常工作，故附上扫描范围、
+    RSI 区间，以及离阈值最近的几只——看得见它确实在算。
+    """
+    cfg = config()["indicators"]["rsi"]
+    low, high = cfg["oversold"], cfg["overbought"]
+    label = config()["indicators"].get("intraday", {}).get("label", "分钟")
+
+    lines = [f"<b>✅ RSI 检查完成</b>  {now_et().strftime('%m-%d %H:%M ET')}",
+             f"<i>无标的触及 {low} / {high}</i>", ""]
+
+    for name, values in ((f"日线", daily), (f"{label}线", intraday)):
+        if not values:
+            lines.append(f"<b>{name}</b>　无数据")
+            continue
+        lo_sym, lo_val = min(values.items(), key=lambda kv: kv[1])
+        hi_sym, hi_val = max(values.items(), key=lambda kv: kv[1])
+        lines.append(f"<b>{name}</b>　{len(values)} 只，区间 {lo_val:.0f}–{hi_val:.0f}")
+        lines.append(f"　最低 <code>{lo_sym}</code> {lo_val:.1f}　"
+                     f"最高 <code>{hi_sym}</code> {hi_val:.1f}")
+    return "\n".join(lines)
+
+
+def _intraday_rsi_alerts(symbols: list[str]) -> tuple[list, dict]:
+    """分钟线 RSI 信号。返回（信号列表, 各标的 RSI 读数）。
+
+    读数一并返回，供"无信号回报"展示扫描范围——只说没有信号
+    没法让人确信程序在正常工作。取数失败不影响日线那一路。"""
     cfg = config()["indicators"].get("intraday", {})
     if not cfg.get("enabled", True) or not symbols:
-        return []
+        return [], {}
     timeframe = str(cfg.get("timeframe", "5Min"))
     label = str(cfg.get("label", "5 分钟"))
     period = int(config()["indicators"]["rsi"]["period"])
@@ -209,17 +244,19 @@ def _intraday_rsi_alerts(symbols: list[str]) -> list:
             symbols, timeframe=timeframe, days=int(cfg.get("lookback_days", 5)))
     except Exception as exc:
         log.warning("分钟线取数失败：%s", exc)
-        return []
+        return [], {}
 
-    out = []
+    out, readings = [], {}
     for sym in symbols:
         series = bars.get(sym) or []
         if len(series) <= period:
             continue
         closes = [b.close for b in series]
-        out.extend(evaluate_intraday_rsi(sym, rsi(closes, period)[-1],
-                                         closes[-1], timeframe=label))
-    return out
+        value = rsi(closes, period)[-1]
+        if value is not None:
+            readings[sym] = value
+        out.extend(evaluate_intraday_rsi(sym, value, closes[-1], timeframe=label))
+    return out, readings
 
 
 def _deliver(text: str, dry_run: bool, label: str) -> int:
@@ -239,7 +276,7 @@ def _deliver(text: str, dry_run: bool, label: str) -> int:
 JOBS = {
     "premarket": lambda a: job_premarket(a.dry_run),
     "postclose": lambda a: job_postclose(a.dry_run),
-    "intraday": lambda a: job_intraday(a.dry_run, a.force),
+    "intraday": lambda a: job_intraday(a.dry_run, a.force, a.summary),
 }
 
 
@@ -248,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("job", choices=sorted(JOBS))
     p.add_argument("--dry-run", action="store_true", help="只打印不推送")
     p.add_argument("--force", action="store_true", help="忽略交易时段限制")
+    p.add_argument("--summary", action="store_true",
+                   help="无论有无信号都推送一条回报（手动查看用，不占当日去重额度）")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
 
