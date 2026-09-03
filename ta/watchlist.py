@@ -128,6 +128,81 @@ def remove(symbol: str, path: Path | None = None) -> str:
     return f"已从 {group} 移除 {symbol}（该组还剩 {len(kept)} 只）"
 
 
+# --------------------------------------------------------------------------
+# 分组的新建与删除
+# --------------------------------------------------------------------------
+
+GROUP_KEY = re.compile(r"[a-z][a-z0-9_]{1,23}")
+DEFAULT_PCT = (10, 20)
+
+
+def _watchlists_span(text: str) -> tuple[int, int]:
+    """watchlists 块的字节区间（不含其后的顶级键）。"""
+    head = re.search(r"^watchlists:\s*$", text, re.M)
+    if not head:
+        raise WatchlistError("配置里找不到 watchlists 段")
+    rest = text[head.end():]
+    nxt = re.search(r"^\S", rest, re.M)
+    return head.end(), head.end() + (nxt.start() if nxt else len(rest))
+
+
+def create_group(key: str, label: str, pct: tuple[float, float] = DEFAULT_PCT,
+                 path: Path | None = None) -> str:
+    """新建一个分组。"""
+    key = key.strip().lower()
+    label = label.strip() or key
+    if not GROUP_KEY.fullmatch(key):
+        raise WatchlistError(
+            "分组标识只能用小写字母、数字和下划线，以字母开头，2–24 个字符")
+    p, text = _read(path)
+    if key in groups(path):
+        raise WatchlistError(f"分组 {key} 已经存在")
+    lo, hi = sorted(float(x) for x in pct)
+    if lo <= 0 or hi <= 0:
+        raise WatchlistError("告警阈值必须大于 0")
+
+    block = (f"\n  {key}:\n"
+             f'    label: "{label}"\n'
+             f"    alert: {{ pct: [{lo:g}, {hi:g}] }}\n"
+             f"    symbols: []\n")
+    _, end = _watchlists_span(text)
+    #  插在 watchlists 块的末尾。区间末尾通常是空行，插在其前面
+    #  才不会把新组挤到下一个顶级键之后。
+    insert_at = end
+    while insert_at > 0 and text[insert_at - 1] == "\n":
+        insert_at -= 1
+    p.write_text(text[:insert_at] + "\n" + block.rstrip("\n") + "\n" + text[insert_at:])
+    config.cache_clear()
+    return f"已新建分组 {label}（{key}），告警阈值 ±{lo:g}% / ±{hi:g}%"
+
+
+def delete_group(key: str, force: bool = False, path: Path | None = None) -> str:
+    """删除一个分组。默认拒绝删非空的组，避免误删掉一串自选股。"""
+    key = key.strip().lower()
+    current = groups(path)
+    if key not in current:
+        raise WatchlistError(f"没有 {key} 这个分组")
+    if len(current) <= 1:
+        raise WatchlistError("至少要保留一个分组")
+    if current[key] and not force:
+        raise WatchlistError(
+            f"{key} 里还有 {len(current[key])} 只标的（{', '.join(current[key])}），"
+            f"先移除或确认强制删除")
+
+    p, text = _read(path)
+    start = re.search(rf"^  {re.escape(key)}:\s*$", text, re.M)
+    if not start:
+        raise WatchlistError(f"配置里定位不到 {key}")
+    rest = text[start.end():]
+    #  删到下一个同级组或下一个顶级键为止 —— 组内的注释随组一起删掉
+    nxt = re.search(r"^(?:  \w+:\s*$|\S)", rest, re.M)
+    end = start.end() + (nxt.start() if nxt else len(rest))
+    p.write_text(text[:start.start()] + text[end:])
+    config.cache_clear()
+    return f"已删除分组 {key}" + (f"（连同 {len(current[key])} 只标的）"
+                                 if current[key] else "")
+
+
 def summary(path: Path | None = None) -> str:
     """给 Telegram 看的分组清单。"""
     data = config() if not path else None

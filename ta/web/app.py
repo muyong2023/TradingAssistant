@@ -173,6 +173,27 @@ def watchlist_remove(request: Request, symbol: str = Form(...)):
     return RedirectResponse(f"/watchlist?msg={quote_plus(result)}", status_code=303)
 
 
+@app.post("/watchlist/group/add")
+def group_add(request: Request, key: str = Form(...), label: str = Form(""),
+              pct_low: float = Form(10), pct_high: float = Form(20)):
+    _same_origin(request)
+    try:
+        result = watchlist.create_group(key, label or key, (pct_low, pct_high))
+    except WatchlistError as exc:
+        return RedirectResponse(f"/watchlist?err={quote_plus(str(exc))}", status_code=303)
+    return RedirectResponse(f"/watchlist?msg={quote_plus(result)}", status_code=303)
+
+
+@app.post("/watchlist/group/remove")
+def group_remove(request: Request, key: str = Form(...), force: str = Form("")):
+    _same_origin(request)
+    try:
+        result = watchlist.delete_group(key, force=bool(force))
+    except WatchlistError as exc:
+        return RedirectResponse(f"/watchlist?err={quote_plus(str(exc))}", status_code=303)
+    return RedirectResponse(f"/watchlist?msg={quote_plus(result)}", status_code=303)
+
+
 @app.get("/api/snapshot")
 def api_snapshot():
     """给外部脚本用的 JSON。"""

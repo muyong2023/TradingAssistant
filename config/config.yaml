@@ -34,7 +34,7 @@ watchlists:
   growth_ai:
     label: "成长/AI 产业链"
     alert: { pct: [10, 18] }
-    symbols: [PLTR, CBRS, NBIS, COHR, LITE, GLW, SNDK, HOOD, FIG]
+    symbols: [PLTR, CBRS, NBIS, COHR, LITE, GLW, SNDK, HOOD, FIG, AVGO]
 
   high_vol:
     label: "高波动"

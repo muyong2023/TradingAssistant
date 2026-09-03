@@ -187,6 +187,29 @@ def cmd_remove(args) -> int:
     return 0
 
 
+def cmd_newlist(args) -> int:
+    from ta import watchlist
+    from ta.watchlist import WatchlistError
+    try:
+        print(watchlist.create_group(args.key, args.label or args.key,
+                                     (args.low, args.high)))
+    except WatchlistError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_dellist(args) -> int:
+    from ta import watchlist
+    from ta.watchlist import WatchlistError
+    try:
+        print(watchlist.delete_group(args.key, force=args.force))
+    except WatchlistError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ta", description="交易小助手")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -207,6 +230,18 @@ def main(argv: list[str] | None = None) -> int:
     rm = sub.add_parser("remove", help="移除自选股")
     rm.add_argument("symbol")
     rm.set_defaults(func=cmd_remove)
+
+    nl = sub.add_parser("newlist", help="新建分组")
+    nl.add_argument("key", help="分组标识，小写字母开头")
+    nl.add_argument("label", nargs="?", help="显示名，默认同标识")
+    nl.add_argument("--low", type=float, default=10, help="低档告警阈值 %%")
+    nl.add_argument("--high", type=float, default=20, help="高档告警阈值 %%")
+    nl.set_defaults(func=cmd_newlist)
+
+    dl = sub.add_parser("dellist", help="删除分组")
+    dl.add_argument("key")
+    dl.add_argument("-f", "--force", action="store_true", help="组内有标的时也删")
+    dl.set_defaults(func=cmd_dellist)
 
     args = parser.parse_args(argv)
     logging.basicConfig(

@@ -105,11 +105,25 @@ python3 scripts/install_launchd.py --install
 
 ## 自选股怎么改
 
-三个入口改的是同一份 `config/config.yaml`，改完下次检查自动生效，无需重启：
+三个入口改的是同一份 `config/config.yaml`，改完下次检查自动生效，无需重启。
+
+**标的：**
 
 - **网页** http://127.0.0.1:8787/watchlist —— 点 × 移除，填代码选分组添加
 - **Telegram** `/list` `/add ORCL growth_ai` `/remove ORCL`
 - **命令行** `./ta.sh list` / `./ta.sh add ORCL -g growth_ai` / `./ta.sh remove ORCL`
+
+**分组：**
+
+- **网页** 「新建分组」表单填标识、显示名与阈值；每组右上角可删
+- **Telegram** `/newlist dividend 高股息 6 11` / `/dellist dividend [force]`
+- **命令行** `./ta.sh newlist dividend 高股息 --low 6 --high 11` / `./ta.sh dellist dividend -f`
+
+分组存在的意义是**按波动性分开设阈值**：防御股跌 5% 是大事，高波动股日内 ±15%
+才值得响，用一个阈值必然导致该响的不响、不该响的天天响。
+
+删除非空分组需要显式 force —— 一条命令删掉一串自选股太容易误操作；
+也不允许删到一个组都不剩。
 
 添加前会到交易所资产库核对代码是否存在。行情接口对不存在的代码只是静默返回
 空数据、不会报错 —— 早期把苹果写成 `APPL`（正确是 `AAPL`）就是这样混进配置的。

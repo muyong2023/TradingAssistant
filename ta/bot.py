@@ -45,6 +45,10 @@ HELP_CORE = """<b>股票助手</b>
 /add &lt;代码&gt; [分组] — 加入，省略分组则进 {default_group}
 /remove &lt;代码&gt; — 移除
 
+<b>分组</b>
+/newlist &lt;标识&gt; [显示名] [低 高] — 新建分组
+/dellist &lt;标识&gt; [force] — 删除分组
+
 <b>信号</b>
 每 5 分钟检查一次，日线与 5 分钟线的 RSI
 低于 {low} 或高于 {high} 时推送，两者分开成条。
@@ -258,6 +262,10 @@ class Bot:
             self._cmd_add(args)
         elif cmd == "remove":
             self._cmd_remove(args)
+        elif cmd == "newlist":
+            self._cmd_newlist(args)
+        elif cmd == "dellist":
+            self._cmd_dellist(args)
         elif cmd == "status":
             self._reply(self._status())
         elif cmd == "clear":
@@ -309,6 +317,30 @@ class Bot:
             self._reply(watchlist.remove(args[0]))
         except WatchlistError as exc:
             self._reply(f"{html.escape(str(exc))}")
+
+    def _cmd_newlist(self, args: list[str]) -> None:
+        if not args:
+            self._reply("用法：<code>/newlist 标识 [显示名] [低阈值 高阈值]</code>\n"
+                        "例：<code>/newlist dividend 高股息 6 11</code>")
+            return
+        key = args[0]
+        label = args[1] if len(args) > 1 else key
+        pct = (float(args[2]), float(args[3])) if len(args) > 3 else watchlist.DEFAULT_PCT
+        try:
+            self._reply(watchlist.create_group(key, label, pct))
+        except (WatchlistError, ValueError) as exc:
+            self._reply(html.escape(str(exc)))
+
+    def _cmd_dellist(self, args: list[str]) -> None:
+        if not args:
+            self._reply("用法：<code>/dellist 标识 [force]</code>\n"
+                        "组内还有标的时需加 force 确认")
+            return
+        force = len(args) > 1 and args[1].lower() in ("force", "-f", "yes")
+        try:
+            self._reply(watchlist.delete_group(args[0], force=force))
+        except WatchlistError as exc:
+            self._reply(html.escape(str(exc)))
 
     def _status(self) -> str:
         cfg = config()

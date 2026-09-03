@@ -27,10 +27,33 @@
   <p class="hint">提交前会到交易所资产库核对代码是否存在，写错会被拦下。</p>
 </section>
 
+<section class="card">
+  <h2>新建分组 <span class="h2-note">不同波动性的票分开设阈值，避免该响的不响、不该响的天天响</span></h2>
+  <form class="add-form" method="post" action="/watchlist/group/add">
+    <input name="key" placeholder="标识，如 dividend" required
+           pattern="[a-z][a-z0-9_]{1,23}" title="小写字母开头，可含数字和下划线"
+           autocomplete="off" spellcheck="false" style="text-transform:none">
+    <input name="label" placeholder="显示名，如 高股息" autocomplete="off"
+           style="text-transform:none">
+    <span class="pct">告警 ±<input name="pct_low" type="number" min="1" max="99"
+           step="0.5" value="10">% / ±<input name="pct_high" type="number" min="1"
+           max="99" step="0.5" value="20">%</span>
+    <button type="submit">新建</button>
+  </form>
+</section>
+
 {% for key, symbols in groups.items() %}
 <section class="card">
   <h2>{{ labels[key] }}
     <span class="h2-note">{{ key }} · {{ symbols|length }} 只 · 涨跌幅阈值 ±{{ alerts[key][0] }}% / ±{{ alerts[key][1] }}%</span>
+    {% if groups|length > 1 %}
+    <form class="group-del" method="post" action="/watchlist/group/remove"
+          onsubmit="return confirm({% if symbols %}'{{ labels[key] }} 里还有 {{ symbols|length }} 只标的，一并删除？'{% else %}'删除空分组 {{ labels[key] }}？'{% endif %})">
+      <input type="hidden" name="key" value="{{ key }}">
+      {% if symbols %}<input type="hidden" name="force" value="1">{% endif %}
+      <button type="submit" title="删除该分组">删除分组</button>
+    </form>
+    {% endif %}
   </h2>
   {% if symbols %}
   <div class="chips">

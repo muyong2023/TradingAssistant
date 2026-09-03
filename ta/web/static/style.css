@@ -242,3 +242,17 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 16px 28px; }
   padding: 2px 7px; border-radius: 50%;
 }
 .chip button:hover { background: var(--band-over); color: var(--critical); }
+
+/* ---- 分组管理 ---- */
+.pct { color: var(--text-secondary); font-size: 13px; display: inline-flex;
+       align-items: center; gap: 4px; }
+.pct input { width: 62px; text-transform: none; }
+.group-del { margin-left: auto; }
+.group-del button {
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px;
+  cursor: pointer;
+}
+.group-del button:hover { background: var(--band-over); color: var(--critical);
+                          border-color: transparent; }
+.card h2 { align-items: center; }
