@@ -177,7 +177,8 @@ def price_chart(bars: list[Bar], periods=(20, 50, 200), window: int = 180,
 
 def rsi_chart(bars: list[Bar], values: list[float | None],
               low: float = 20, high: float = 80,
-              width: int = 900, height: int = 120) -> str:
+              width: int = 900, height: int = 120,
+              tiers: tuple[list[float], list[float]] | None = None) -> str:
     """RSI 独立面板。绝不与价格共用一个 y 轴 —— 量纲不同，双轴是错的。"""
     pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if len(pairs) < 2:
@@ -192,13 +193,18 @@ def rsi_chart(bars: list[Bar], values: list[float | None],
     out = [f'<svg class="rsi-chart" viewBox="0 0 {width} {height}" width="100%" '
            f'preserveAspectRatio="xMidYMid meet" role="img" aria-label="RSI 走势图">']
 
-    # 超买/超卖区带
-    out.append(f'<rect x="{left}" y="{top + ys(100):.1f}" width="{plot_w}" '
-               f'height="{ys(high) - ys(100):.1f}" class="band-over"/>')
-    out.append(f'<rect x="{left}" y="{top + ys(low):.1f}" width="{plot_w}" '
-               f'height="{ys(0) - ys(low):.1f}" class="band-under"/>')
+    # 超买/超卖区带。有两档时画两层，越深的一档颜色越重，
+    # 一眼能看出当前在浅档还是深档。
+    lows = (tiers[0] if tiers else [low])
+    highs = (tiers[1] if tiers else [high])
+    for lv in highs:
+        out.append(f'<rect x="{left}" y="{top + ys(100):.1f}" width="{plot_w}" '
+                   f'height="{ys(lv) - ys(100):.1f}" class="band-over"/>')
+    for lv in lows:
+        out.append(f'<rect x="{left}" y="{top + ys(lv):.1f}" width="{plot_w}" '
+                   f'height="{ys(0) - ys(lv):.1f}" class="band-under"/>')
 
-    for level in (low, 50, high):
+    for level in sorted({*lows, 50, *highs}):
         y = top + ys(level)
         out.append(f'<line x1="{left}" y1="{y:.1f}" x2="{left + plot_w}" y2="{y:.1f}" '
                    f'class="grid"/>')

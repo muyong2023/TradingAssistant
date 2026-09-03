@@ -21,7 +21,7 @@ from ta.data.base import DataError
 from ta import watchlist
 from ta.data.router import DataRouter
 from ta.earnings import all_events as earnings_all
-from ta.indicators import compute, rsi
+from ta.indicators import compute, rsi, rsi_tiers, rsi_zone
 from ta.market import is_market_hours, now_et, session_fraction
 from ta.reports import Digest, Row
 from ta.web import charts
@@ -118,7 +118,8 @@ def detail(request: Request, symbol: str):
         "earnings": earn,
         "group": group_of(symbol),
         "price_svg": charts.price_chart(series, window=DETAIL_WINDOW),
-        "rsi_svg": charts.rsi_chart(window, rsi_vals, cfg["oversold"], cfg["overbought"]),
+        "rsi_svg": charts.rsi_chart(window, rsi_vals, *rsi_zone(cfg),
+                                   tiers=rsi_tiers(cfg)),
         "bars": window,
     }
     return templates.TemplateResponse(request, "detail.html", ctx)

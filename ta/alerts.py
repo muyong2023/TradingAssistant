@@ -15,7 +15,7 @@ from datetime import date
 from ta import store
 from ta.config import alert_tiers, config, group_of
 from ta.data.base import Quote
-from ta.indicators import Snapshot
+from ta.indicators import Snapshot, rsi_hit, rsi_tiers
 
 
 @dataclass(frozen=True)
@@ -89,25 +89,20 @@ def evaluate(quote: Quote, snap: Snapshot | None) -> list[Alert]:
     # --- RSI 极值 ---
     rsi_cfg = cfg["indicators"]["rsi"]
     if cfg["alerts"].get("rsi_alert", True) and snap and snap.rsi is not None:
-        low, high = rsi_cfg["oversold"], rsi_cfg["overbought"]
-        if snap.rsi <= low:
-            #  越深入极值区越重要；刚好压线的读数不该盖过一次暴跌
-            beyond = low - snap.rsi
+        hit = rsi_hit(snap.rsi, rsi_cfg)
+        if hit:
+            direction, tier = hit
+            word = "超卖" if direction == "oversold" else "超买"
+            side = "低于" if direction == "oversold" else "高于"
             out.append(Alert(
-                symbol=quote.symbol, kind="rsi_extreme", tier="oversold",
-                headline=f"RSI {snap.rsi:.1f} 超卖   ${quote.price:,.2f}",
-                detail=f"低于阈值 {low}  ·  {snap.trend()}  ·  当日 {change:+.2f}%",
-                severity=2 if beyond >= 5 else 1,
-                magnitude=1.0 + beyond / 20.0,
-            ))
-        elif snap.rsi >= high:
-            beyond = snap.rsi - high
-            out.append(Alert(
-                symbol=quote.symbol, kind="rsi_extreme", tier="overbought",
-                headline=f"RSI {snap.rsi:.1f} 超买   ${quote.price:,.2f}",
-                detail=f"高于阈值 {high}  ·  {snap.trend()}  ·  当日 {change:+.2f}%",
-                severity=2 if beyond >= 5 else 1,
-                magnitude=1.0 + beyond / 20.0,
+                symbol=quote.symbol, kind="rsi_extreme",
+                #  档位写进 tier，两档因而各自去重：
+                #  先到 28 报过 30 档后，跌到 18 仍会再报 20 档
+                tier=f"{direction}{tier:g}",
+                headline=f"RSI {snap.rsi:.1f} {word}   ${quote.price:,.2f}",
+                detail=f"{side}阈值 {tier:g}  ·  {snap.trend()}  ·  当日 {change:+.2f}%",
+                severity=_rsi_severity(tier, rsi_cfg),
+                magnitude=_rsi_magnitude(snap.rsi, direction, tier),
             ))
 
     # --- 放量（默认关闭，噪音大）---
@@ -142,31 +137,41 @@ def filter_new(alerts: list[Alert], day: date | None = None) -> list[Alert]:
 # 分钟线 RSI
 # --------------------------------------------------------------------------
 
+def _rsi_severity(tier: float, cfg: dict) -> int:
+    """最内侧那一档算重要，外档算一般。"""
+    low, high = rsi_tiers(cfg)
+    return 2 if tier in (low[-1], high[-1]) else 1
+
+
+def _rsi_magnitude(value: float, direction: str, tier: float) -> float:
+    """超出该档多少，用于同一批告警之间排序。"""
+    beyond = (tier - value) if direction == "oversold" else (value - tier)
+    return 1.0 + max(beyond, 0.0) / 20.0
+
+
 def evaluate_intraday_rsi(symbol: str, rsi_value: float | None, price: float,
                           timeframe: str = "5分钟") -> list[Alert]:
     """分钟线 RSI 的超买超卖。
 
     与日线分开成独立的 kind，因而去重也各自独立 —— 同一只票的日线
-    超卖和 5 分钟超卖是两件事，都值得知道。
+    超卖和 5 分钟超卖是两件事，都值得知道。档位处理与日线一致。
     """
     if rsi_value is None:
         return []
     cfg = config()["indicators"]["rsi"]
-    low, high = cfg["oversold"], cfg["overbought"]
-
-    if rsi_value <= low:
-        beyond, tier, word = low - rsi_value, "oversold", "超卖"
-    elif rsi_value >= high:
-        beyond, tier, word = rsi_value - high, "overbought", "超买"
-    else:
+    hit = rsi_hit(rsi_value, cfg)
+    if not hit:
         return []
+    direction, tier = hit
+    word = "超卖" if direction == "oversold" else "超买"
+    side = "低于" if direction == "oversold" else "高于"
 
     return [Alert(
         symbol=symbol,
         kind="rsi_intraday",
-        tier=tier,
+        tier=f"{direction}{tier:g}",
         headline=f"{timeframe} RSI {rsi_value:.1f} {word}   ${price:,.2f}",
-        detail=f"阈值 {low}/{high}  ·  分组 {group_of(symbol)}",
-        severity=2 if beyond >= 5 else 1,
-        magnitude=1.0 + beyond / 20.0,
+        detail=f"{side}阈值 {tier:g}  ·  分组 {group_of(symbol)}",
+        severity=_rsi_severity(tier, cfg),
+        magnitude=_rsi_magnitude(rsi_value, direction, tier),
     )]

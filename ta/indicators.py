@@ -69,6 +69,49 @@ def _rsi_from(avg_gain: float, avg_loss: float) -> float:
     return 100.0 - 100.0 / (1.0 + rs)
 
 
+def rsi_tiers(cfg: dict) -> tuple[list[float], list[float]]:
+    """解析 RSI 的触发档位，返回（超卖档, 超买档），均按"由浅入深"排序。
+
+    配置既接受单个数值（旧写法），也接受列表：
+        oversold: 20          -> [20]
+        oversold: [30, 20]    -> [30, 20]   先到 30 报一次，再到 20 报一次
+    """
+    def parse(value, deeper_is_lower: bool) -> list[float]:
+        items = value if isinstance(value, (list, tuple)) else [value]
+        nums = sorted((float(x) for x in items), reverse=deeper_is_lower)
+        return nums
+
+    return (parse(cfg.get("oversold", 20), True),
+            parse(cfg.get("overbought", 80), False))
+
+
+def rsi_zone(cfg: dict) -> tuple[float, float]:
+    """最外侧的一档，即"进入极值区"的边界。
+
+    用于着色、图表区带、状态文案这类只需要一个界线的场合。
+    """
+    low, high = rsi_tiers(cfg)
+    return low[0], high[0]
+
+
+def rsi_hit(value: float, cfg: dict) -> tuple[str, float] | None:
+    """判断 RSI 触及了哪一档，返回（方向, 档位值）。
+
+    触及多档时只报最深的那一档 —— 与涨跌幅告警同样的处理：
+    一次从 35 跌到 18 只需报"18 已到 20 档"，不必连报两条。
+    去重按档位分别记录，所以先到 28 报过 30 档之后，
+    继续跌到 18 仍会再报 20 档。
+    """
+    low, high = rsi_tiers(cfg)
+    hit_low = [t for t in low if value <= t]
+    if hit_low:
+        return "oversold", min(hit_low)
+    hit_high = [t for t in high if value >= t]
+    if hit_high:
+        return "overbought", max(hit_high)
+    return None
+
+
 def volume_ratio(volumes: list[float], lookback: int = 20,
                  session_fraction: float = 1.0) -> float | None:
     """最新一日量 / 之前 lookback 日均量。>2 通常认为是放量。

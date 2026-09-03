@@ -23,6 +23,7 @@ import requests
 
 from ta import store, watchlist
 from ta.chat import ask
+from ta.indicators import rsi_tiers
 from ta.watchlist import WatchlistError
 from ta.config import config, redact, secrets
 from ta.market import is_market_hours, now_et
@@ -68,7 +69,9 @@ def build_help() -> str:
     cfg = config()
     rsi_cfg = cfg["indicators"]["rsi"]
     groups = list(cfg["watchlists"])
-    text = HELP_CORE.format(low=rsi_cfg["oversold"], high=rsi_cfg["overbought"],
+    low, high = rsi_tiers(rsi_cfg)
+    text = HELP_CORE.format(low="/".join(f"{t:g}" for t in low),
+                            high="/".join(f"{t:g}" for t in high),
                             default_group=groups[0] if groups else "core")
     if cfg.get("chat", {}).get("enabled", True):
         text += HELP_CHAT
@@ -381,7 +384,8 @@ class Bot:
         return (
             f"<b>运行状态</b>\n"
             f"自选股 {total} 只 / {len(cfg['watchlists'])} 组\n"
-            f"RSI 阈值 {rsi_cfg['oversold']} / {rsi_cfg['overbought']}\n"
+            f"RSI 档位 {'/'.join(f'{t:g}' for t in rsi_tiers(rsi_cfg)[0])}"
+            f" / {'/'.join(f'{t:g}' for t in rsi_tiers(rsi_cfg)[1])}\n"
             f"日线信号 {on(cfg['alerts'].get('rsi_alert', True))}　"
             f"{intraday.get('label', '分钟')}线信号 {on(intraday.get('enabled'))}\n"
             f"涨跌幅告警 {on(cfg['alerts'].get('pct_move_alert'))}\n"

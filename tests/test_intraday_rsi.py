@@ -22,16 +22,30 @@ def test_oversold_triggers():
     alerts = evaluate_intraday_rsi("NVDA", 15.0, 200.0)
     assert len(alerts) == 1
     assert alerts[0].kind == "rsi_intraday"
-    assert alerts[0].tier == "oversold"
+    assert alerts[0].tier == "oversold20"
     assert "超卖" in alerts[0].headline
 
 
 def test_overbought_triggers():
-    assert evaluate_intraday_rsi("NVDA", 88.0, 200.0)[0].tier == "overbought"
+    assert evaluate_intraday_rsi("NVDA", 88.0, 200.0)[0].tier == "overbought80"
 
 
 def test_normal_range_silent():
     assert evaluate_intraday_rsi("NVDA", 55.0, 200.0) == []
+
+
+def test_outer_tier_triggers():
+    a = evaluate_intraday_rsi("NVDA", 28.0, 200.0)[0]
+    assert a.tier == "oversold30"
+    assert "低于阈值 30" in a.detail
+
+
+def test_intraday_tiers_dedupe_independently(db):
+    """分钟线同样两档独立去重。"""
+    day = date(2026, 9, 4)
+    assert len(filter_new(evaluate_intraday_rsi("KO", 28.0, 100.0), day=day)) == 1
+    assert filter_new(evaluate_intraday_rsi("KO", 29.0, 100.0), day=day) == []
+    assert len(filter_new(evaluate_intraday_rsi("KO", 18.0, 100.0), day=day)) == 1
 
 
 def test_missing_rsi_silent():
@@ -44,8 +58,8 @@ def test_timeframe_label_in_headline():
 
 
 def test_deep_extreme_is_severe():
-    assert evaluate_intraday_rsi("NVDA", 12.0, 200.0)[0].severity == 2
-    assert evaluate_intraday_rsi("NVDA", 19.0, 200.0)[0].severity == 1
+    assert evaluate_intraday_rsi("NVDA", 12.0, 200.0)[0].severity == 2   # 内档
+    assert evaluate_intraday_rsi("NVDA", 28.0, 200.0)[0].severity == 1   # 外档
 
 
 def test_daily_and_intraday_dedupe_independently(db):

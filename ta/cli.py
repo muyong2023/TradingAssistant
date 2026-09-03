@@ -14,7 +14,7 @@ from ta import store
 from ta.config import all_symbols, config, group_of, watchlists
 from ta.data.base import DataError
 from ta.data.router import DataRouter
-from ta.indicators import compute
+from ta.indicators import compute, rsi_zone
 from ta.market import is_market_hours, session_fraction
 
 # 终端色彩：涨绿跌红，无 tty 时自动关闭
@@ -39,9 +39,10 @@ def _rsi_cell(v: float | None, cfg: dict, width: int) -> str:
     if v is None:
         return "-".rjust(width)
     text = f"{v:.1f}".rjust(width)
-    if v <= cfg["oversold"]:
+    low, high = rsi_zone(cfg)
+    if v <= low:
         return _c(text, "36")      # 超卖，青色
-    if v >= cfg["overbought"]:
+    if v >= high:
         return _c(text, "35")      # 超买，紫色
     return text
 
@@ -126,9 +127,10 @@ def _print_table(rows, rsi_cfg, router) -> None:
             f"{_fmt_vr(vr, snap.volume_ratio_projected):>7}  {snap.trend()}"
         )
         if snap.rsi is not None:
-            if snap.rsi <= rsi_cfg["oversold"]:
+            low, high = rsi_zone(rsi_cfg)
+            if snap.rsi <= low:
                 notable.append(f"{sym} RSI {snap.rsi:.1f} 超卖")
-            elif snap.rsi >= rsi_cfg["overbought"]:
+            elif snap.rsi >= high:
                 notable.append(f"{sym} RSI {snap.rsi:.1f} 超买")
         if abs(change) >= 5:
             notable.append(f"{sym} 当日 {change:+.1f}%")

@@ -107,3 +107,38 @@ def test_volume_ratio_projects_partial_session():
 def test_volume_ratio_no_projection_after_close():
     vols = [100.0] * 20 + [60.0]
     assert volume_ratio(vols, 20, session_fraction=1.0) == pytest.approx(0.6)
+
+
+def test_rsi_tiers_parses_list():
+    from ta.indicators import rsi_tiers
+    low, high = rsi_tiers({"oversold": [20, 30], "overbought": [80, 70]})
+    assert low == [30.0, 20.0]      # 由浅入深
+    assert high == [70.0, 80.0]
+
+
+def test_rsi_tiers_accepts_scalar():
+    """单个数值的旧写法要继续能用。"""
+    from ta.indicators import rsi_tiers
+    assert rsi_tiers({"oversold": 20, "overbought": 80}) == ([20.0], [80.0])
+
+
+def test_rsi_zone_returns_outermost():
+    from ta.indicators import rsi_zone
+    assert rsi_zone({"oversold": [30, 20], "overbought": [70, 80]}) == (30.0, 70.0)
+
+
+@pytest.mark.parametrize("value,expected", [
+    (85, ("overbought", 80.0)),
+    (78, ("overbought", 70.0)),
+    (70, ("overbought", 70.0)),
+    (68, None),
+    (50, None),
+    (32, None),
+    (30, ("oversold", 30.0)),
+    (28, ("oversold", 30.0)),
+    (19, ("oversold", 20.0)),
+    (5, ("oversold", 20.0)),
+])
+def test_rsi_hit_picks_deepest_tier(value, expected):
+    from ta.indicators import rsi_hit
+    assert rsi_hit(value, {"oversold": [30, 20], "overbought": [70, 80]}) == expected

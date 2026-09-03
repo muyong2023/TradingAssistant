@@ -64,16 +64,47 @@ def test_up_and_down_are_separate_tiers():
 def test_rsi_oversold_alert():
     alerts = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=18.0))
     assert [a.kind for a in alerts] == ["rsi_extreme"]
-    assert alerts[0].tier == "oversold"
+    assert alerts[0].tier == "oversold20"
 
 
 def test_rsi_overbought_alert():
     alerts = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=85.0))
-    assert alerts[0].tier == "overbought"
+    assert alerts[0].tier == "overbought80"
 
 
 def test_rsi_normal_no_alert():
     assert evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=55.0)) == []
+
+
+def test_rsi_outer_tier_alert():
+    """两档：先到 30 就该报一次。"""
+    a = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=28.0))[0]
+    assert a.tier == "oversold30"
+    assert a.severity == 1          # 外档，一般
+
+
+def test_rsi_inner_tier_is_severe():
+    a = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=18.0))[0]
+    assert a.severity == 2          # 内档，重要
+
+
+def test_rsi_reports_deepest_tier_only():
+    """一次从 35 跌到 18 只报最深那档，不必连报两条。"""
+    alerts = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=18.0))
+    assert len(alerts) == 1
+    assert alerts[0].tier == "oversold20"
+
+
+def test_rsi_tiers_dedupe_independently(db):
+    """先到 28 报过 30 档，继续跌到 18 仍应再报 20 档。"""
+    from datetime import date as _date
+    day = _date(2026, 9, 4)
+    first = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=28.0))
+    assert len(filter_new(first, day=day)) == 1
+    again = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=28.5))
+    assert filter_new(again, day=day) == []          # 同档不重复
+    deeper = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=18.0))
+    assert len(filter_new(deeper, day=day)) == 1     # 深一档再报
 
 
 def test_pct_and_rsi_can_both_fire():
@@ -109,7 +140,7 @@ def test_missing_snapshot_still_reports_pct(db):
 def test_big_move_outranks_marginal_rsi():
     """曾经的 bug：跌 19.5% 被标成一般，刚压线的 RSI 却标成重要。"""
     big = evaluate(quote("IONQ", 33.0, 41.0), snap("IONQ", rsi=48.0))[0]
-    marginal = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=19.5))[0]
+    marginal = evaluate(quote("KO", 100.0, 100.0), snap("KO", rsi=29.5))[0]
     assert big.severity == 2
     assert marginal.severity == 1
 

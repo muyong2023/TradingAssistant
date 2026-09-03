@@ -21,7 +21,7 @@ from ta import macro
 from ta.config import all_symbols, config, group_of, secrets, watchlists
 from ta.data.news import AlpacaNews, compile_filters, rank
 from ta.data.router import DataRouter
-from ta.indicators import compute, rsi
+from ta.indicators import compute, rsi, rsi_tiers, rsi_zone
 from ta.market import ET, is_market_hours, last_session_close, now_et, session_fraction
 
 log = logging.getLogger(__name__)
@@ -91,10 +91,13 @@ def get_indicators(symbol: str) -> str:
     parts = [f"{symbol}  收盘/现价 ${snap.close:,.2f}  趋势：{snap.trend()}"]
     if snap.rsi is not None:
         cfg = config()["indicators"]["rsi"]
-        state = ("超卖" if snap.rsi <= cfg["oversold"]
-                 else "超买" if snap.rsi >= cfg["overbought"] else "中性")
-        parts.append(f"RSI(14) {snap.rsi:.1f}（{state}，阈值 "
-                     f"{cfg['oversold']}/{cfg['overbought']}）")
+        low, high = rsi_zone(cfg)
+        state = ("超卖" if snap.rsi <= low
+                 else "超买" if snap.rsi >= high else "中性")
+        tiers_low, tiers_high = rsi_tiers(cfg)
+        parts.append(f"RSI(14) {snap.rsi:.1f}（{state}，档位 "
+                     f"{'/'.join(f'{t:g}' for t in tiers_low)}"
+                     f"·{'/'.join(f'{t:g}' for t in tiers_high)}）")
     for period in (20, 50, 200):
         value, gap = snap.sma.get(period), snap.sma_gap_pct.get(period)
         if value is None:

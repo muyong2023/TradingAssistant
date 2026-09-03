@@ -21,7 +21,7 @@ from ta.data.base import DataError
 from ta.data.news import AlpacaNews, compile_filters, data_releases, rank
 from ta.data.router import DataRouter
 from ta.earnings import upcoming as earnings_upcoming
-from ta.indicators import compute, rsi
+from ta.indicators import compute, rsi, rsi_tiers, rsi_zone
 from ta.macro import next_fomc, next_key_events, upcoming
 from ta.market import is_market_hours, last_session_close, now_et, session_fraction
 from ta.notify.telegram import Telegram
@@ -223,6 +223,10 @@ def _run_rsi_check(router: DataRouter, dry_run: bool, summary: bool) -> int:
     return 0
 
 
+def _fmt_tiers(tiers: list) -> str:
+    return "/".join(f"{t:g}" for t in tiers)
+
+
 def _no_signal_report(daily: dict, intraday: dict) -> str:
     """没有触发时的回报。
 
@@ -230,11 +234,12 @@ def _no_signal_report(daily: dict, intraday: dict) -> str:
     RSI 区间，以及离阈值最近的几只——看得见它确实在算。
     """
     cfg = config()["indicators"]["rsi"]
-    low, high = cfg["oversold"], cfg["overbought"]
+    low, high = rsi_zone(cfg)
+    tiers_low, tiers_high = rsi_tiers(cfg)
     label = config()["indicators"].get("intraday", {}).get("label", "分钟")
 
     lines = [f"<b>✅ RSI 检查完成</b>  {now_et().strftime('%m-%d %H:%M ET')}",
-             f"<i>无标的触及 {low} / {high}</i>", ""]
+             f"<i>无标的触及 {_fmt_tiers(tiers_low)} / {_fmt_tiers(tiers_high)}</i>", ""]
     if not is_market_hours():
         #  盘前盘后的分钟线是上一交易时段的收尾，不是实时读数，
         #  不标出来容易被误读成当下的盘中状态

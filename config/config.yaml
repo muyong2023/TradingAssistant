@@ -83,8 +83,11 @@ indicators:
   ema: [12, 26]
   rsi:
     period: 14
-    oversold: 20
-    overbought: 80
+    # 两档触发，由浅入深：先到外档报一次，继续深入到内档再报一次。
+    # 两档独立去重——先到 28 报过 30 档后，跌到 18 仍会再报 20 档。
+    # 写成单个数值（oversold: 20）也兼容，即只有一档。
+    oversold: [30, 20]
+    overbought: [70, 80]
   # 分钟线 RSI —— 与日线独立的一路信号，独立去重、独立成条消息
   intraday:
     enabled: true

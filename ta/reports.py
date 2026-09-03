@@ -13,6 +13,7 @@ from ta.indicators import Snapshot
 from ta.market import now_et
 from ta.data.news import NewsItem
 from ta.earnings import EarningsEvent
+from ta.indicators import rsi_zone
 from ta.macro import MacroEvent, classify
 from ta.market import ET, now_et
 from ta.notify.telegram import escape
@@ -62,9 +63,10 @@ class Digest:
         for r in self.rows:
             if not r.snap or r.snap.rsi is None:
                 continue
-            if r.snap.rsi >= cfg["overbought"]:
+            low, high = rsi_zone(cfg)
+            if r.snap.rsi >= high:
                 over.append(r)
-            elif r.snap.rsi <= cfg["oversold"]:
+            elif r.snap.rsi <= low:
                 under.append(r)
         return over, under
 
