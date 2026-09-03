@@ -15,6 +15,7 @@ from ta.data.base import Bar, DataError, Quote
 
 DATA_URL = "https://data.alpaca.markets"
 TRADING_URL = "https://api.alpaca.markets"
+PAPER_URL = "https://paper-api.alpaca.markets"
 TIMEOUT = 20
 
 
@@ -25,6 +26,8 @@ class AlpacaProvider:
         s = secrets()
         s.require("alpaca_key_id", "alpaca_secret")
         self.feed = feed
+        #  /v2/assets 用哪个域名，首次成功后记住
+        self._account_host: str | None = None
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -159,6 +162,29 @@ class AlpacaProvider:
             if not page_token:
                 break
         return out
+
+    def get_asset(self, symbol: str) -> dict | None:
+        """查一个代码是否存在。用于加自选前的校验。
+
+        当初把苹果写成 APPL（正确是 AAPL）就是这样漏过去的 ——
+        代码不存在时行情接口只是静默返回空，不会报错。
+
+        /v2/assets 与账户类型绑定：Paper 的 key 在 live 域名上会拿到 401，
+        反之亦然。故按需探测一次并记住结果。
+        （/v2/calendar 不绑账户，两个域名都可用，无需此处理。）
+        """
+        path = f"/v2/assets/{symbol.upper()}"
+        hosts = [self._account_host] if self._account_host else [TRADING_URL, PAPER_URL]
+        for host in hosts:
+            try:
+                asset = self._get(host, path)
+            except DataError as exc:
+                if "401" in str(exc) or "403" in str(exc):
+                    continue          # 域名与账户类型不匹配，换一个
+                return None           # 404 等：代码确实不存在
+            self._account_host = host
+            return asset
+        return None
 
     def is_trading_day(self, day: date) -> bool:
         """问交易日历，自动排除周末和节假日。"""

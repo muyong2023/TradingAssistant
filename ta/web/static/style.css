@@ -194,3 +194,51 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 16px 28px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
         color: var(--critical); word-break: break-all; }
 .empty { color: var(--muted); font-size: 13px; }
+
+/* ---- 导航 ---- */
+.nav { display: flex; gap: 16px; font-size: 13px; margin-left: 4px; }
+.nav a { color: var(--text-secondary); }
+.nav a:hover { color: var(--series-1); text-decoration: none; }
+
+/* ---- 提示条 ---- */
+.flash {
+  padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;
+  font-size: 13px; border: 1px solid var(--border);
+}
+.flash.ok  { background: var(--band-under); color: var(--delta-up); }
+.flash.bad { background: var(--band-over);  color: var(--delta-down); }
+
+/* ---- 添加表单 ---- */
+.add-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.add-form input, .add-form select, .add-form button {
+  font: inherit; padding: 7px 11px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--page);
+  color: var(--text-primary);
+}
+.add-form input { width: 190px; text-transform: uppercase; }
+.add-form input::placeholder { text-transform: none; color: var(--muted); }
+.add-form button {
+  background: var(--series-1); color: #fff; border-color: transparent;
+  cursor: pointer; font-weight: 600; padding-inline: 18px;
+}
+.add-form button:hover { filter: brightness(1.08); }
+.hint { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+.sub { color: var(--text-secondary); font-size: 13px; margin: 4px 0 0; }
+
+/* ---- 标的胶囊 ---- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 4px 3px 12px; background: var(--page);
+  font-variant-numeric: tabular-nums;
+}
+.chip a { font-weight: 600; color: var(--text-primary); font-size: 13px; }
+.chip a:hover { color: var(--series-1); text-decoration: none; }
+.chip form { display: inline; margin: 0; }
+.chip button {
+  border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 15px; line-height: 1;
+  padding: 2px 7px; border-radius: 50%;
+}
+.chip button:hover { background: var(--band-over); color: var(--critical); }

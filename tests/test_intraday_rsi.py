@@ -84,17 +84,23 @@ def test_new_day_resets(db):
                           day=date(2026, 9, 4))) == 1
 
 
-def test_pct_move_respects_switch(monkeypatch, isolated_config):
-    """涨跌幅告警关掉后，即便跌破阈值也不该产出信号。"""
+def test_pct_move_respects_switch(isolated_config):
+    """涨跌幅告警关掉后，即便跌破阈值也不该产出信号。
+
+    isolated_config 是测试用配置的路径；就地改开关而不重写整份文件，
+    以免破坏 symbols 的方括号写法。
+    """
+    import re
+
     from ta import config as C
+
     quote = Quote(symbol="KO", price=80.0, prev_close=100.0, day_open=100.0,
                   day_high=100.0, day_low=80.0, day_volume=1e6,
                   ts=datetime.now(timezone.utc), source="test")
     assert any(a.kind == "pct_move" for a in evaluate(quote, None))
 
-    isolated_config["alerts"]["pct_move_alert"] = False
-    import yaml
-    C.CONFIG_PATH.write_text(yaml.safe_dump(isolated_config, allow_unicode=True,
-                                            sort_keys=False))
+    text = isolated_config.read_text()
+    isolated_config.write_text(
+        re.sub(r"^(\s+pct_move_alert:\s*)true\b", r"\1false", text, flags=re.M))
     C.config.cache_clear()
     assert not any(a.kind == "pct_move" for a in evaluate(quote, None))

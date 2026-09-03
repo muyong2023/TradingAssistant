@@ -7,7 +7,7 @@
 
 | 能力 | 说明 |
 |---|---|
-| **自选股管理** | Telegram `/add` `/remove` `/list`，或命令行 `./ta.sh add/remove/list` |
+| **自选股管理** | 网页 `/watchlist` 点选增删，或 Telegram `/add` `/remove` `/list`，或命令行 |
 | **RSI 信号** | 09:30–16:00 每 5 分钟检查，**日线**与 **5 分钟线** RSI 触及 20/80 时分别推送 |
 | 盘前简报 | 交易日 09:00 ET 推送隔夜变动与当日关注点（*当前关闭*）|
 | 盘后复盘 | 16:15 ET 推送领涨领跌与信号变化（*当前关闭*）|
@@ -102,6 +102,24 @@ earnings: { enabled: false }
 ```bash
 python3 scripts/install_launchd.py --install
 ```
+
+## 自选股怎么改
+
+三个入口改的是同一份 `config/config.yaml`，改完下次检查自动生效，无需重启：
+
+- **网页** http://127.0.0.1:8787/watchlist —— 点 × 移除，填代码选分组添加
+- **Telegram** `/list` `/add ORCL growth_ai` `/remove ORCL`
+- **命令行** `./ta.sh list` / `./ta.sh add ORCL -g growth_ai` / `./ta.sh remove ORCL`
+
+添加前会到交易所资产库核对代码是否存在。行情接口对不存在的代码只是静默返回
+空数据、不会报错 —— 早期把苹果写成 `APPL`（正确是 `AAPL`）就是这样混进配置的。
+
+写入是对 YAML 的**定点文本编辑**，只替换 `symbols: [...]` 方括号内的内容。
+读出后整份 dump 回去会抹掉配置里全部注释，那些注释是配置的一半价值。
+因此该文件的 symbols 必须保持方括号写法，改成多行列表会被拒绝并给出提示。
+
+网页的写接口会校验 `Origin`：页面无认证地监听在回环地址，而浏览器允许任意
+站点向 127.0.0.1 提交表单，没有这道检查，别处打开的恶意页面就能悄悄改你的自选股。
 
 ## 双时间尺度的 RSI
 

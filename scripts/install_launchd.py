@@ -94,6 +94,22 @@ def enabled_jobs() -> dict[str, bool]:
     return flags
 
 
+def web_job() -> dict:
+    """本地看板。只监听回环地址——页面上是持仓且没有认证。"""
+    return {
+        "Label": f"{PREFIX}.web",
+        "ProgramArguments": [str(ROOT / ".venv" / "bin" / "uvicorn"),
+                             "ta.web.app:app", "--host", "127.0.0.1",
+                             "--port", "8787"],
+        "WorkingDirectory": str(ROOT),
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 10,
+        "StandardOutPath": str(LOGS / "web.log"),
+        "StandardErrorPath": str(LOGS / "web.err.log"),
+    }
+
+
 def build() -> dict[str, dict]:
     flags = enabled_jobs()
     all_jobs = {
@@ -102,6 +118,7 @@ def build() -> dict[str, dict]:
         "postclose": calendar_job("postclose", 16, 15),
         #  bot 常驻：即便问答关闭，它仍要接 /add /remove /list 等命令
         "bot": daemon_job("bot", "ta.bot"),
+        "web": web_job(),
     }
     return {name: spec for name, spec in all_jobs.items()
             if flags.get(name, True)}
@@ -147,7 +164,7 @@ def install() -> int:
 
 def remove() -> int:
     #  卸载时不看开关，把所有可能装过的都清掉
-    for job in ("premarket", "intraday", "postclose", "bot"):
+    for job in ("premarket", "intraday", "postclose", "bot", "web"):
         label = f"{PREFIX}.{job}"
         launchctl("bootout", f"{domain()}/{label}")
         path = AGENTS / f"{label}.plist"

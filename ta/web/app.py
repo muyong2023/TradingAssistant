@@ -8,21 +8,24 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import quote_plus
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ta.config import all_symbols, config, group_of, watchlists
 from ta.data.base import DataError
+from ta import watchlist
 from ta.data.router import DataRouter
 from ta.earnings import all_events as earnings_all
 from ta.indicators import compute, rsi
 from ta.market import is_market_hours, now_et, session_fraction
 from ta.reports import Digest, Row
 from ta.web import charts
+from ta.watchlist import WatchlistError
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="交易小助手")
@@ -119,6 +122,55 @@ def detail(request: Request, symbol: str):
         "bars": window,
     }
     return templates.TemplateResponse(request, "detail.html", ctx)
+
+
+def _same_origin(request: Request) -> None:
+    """拒绝跨站发来的写请求。
+
+    页面监听在回环地址、没有认证，但浏览器允许任意网站向 127.0.0.1
+    提交表单。没有这道检查，你在别处打开的恶意页面就能悄悄改你的自选股。
+    """
+    origin = request.headers.get("origin")
+    if origin and request.url.netloc not in origin:
+        raise HTTPException(403, "跨站请求已拒绝")
+
+
+@app.get("/watchlist", response_class=HTMLResponse)
+def watchlist_page(request: Request, msg: str = "", err: str = ""):
+    cfg = config()
+    return templates.TemplateResponse(request, "watchlist.html", {
+        **_context(request),
+        "groups": watchlist.groups(),
+        "labels": {k: v["label"] for k, v in cfg["watchlists"].items()},
+        "alerts": {k: v["alert"]["pct"] for k, v in cfg["watchlists"].items()},
+        "msg": msg,
+        "err": err,
+    })
+
+
+@app.post("/watchlist/add")
+def watchlist_add(request: Request, symbol: str = Form(...), group: str = Form(...)):
+    _same_origin(request)
+    symbol = symbol.strip().upper()
+    ok, note = watchlist.validate(symbol)
+    if not ok:
+        return RedirectResponse(f"/watchlist?err={quote_plus(note)}", status_code=303)
+    try:
+        result = watchlist.add(symbol, group)
+    except WatchlistError as exc:
+        return RedirectResponse(f"/watchlist?err={quote_plus(str(exc))}", status_code=303)
+    return RedirectResponse(f"/watchlist?msg={quote_plus(result + ' · ' + note)}",
+                            status_code=303)
+
+
+@app.post("/watchlist/remove")
+def watchlist_remove(request: Request, symbol: str = Form(...)):
+    _same_origin(request)
+    try:
+        result = watchlist.remove(symbol)
+    except WatchlistError as exc:
+        return RedirectResponse(f"/watchlist?err={quote_plus(str(exc))}", status_code=303)
+    return RedirectResponse(f"/watchlist?msg={quote_plus(result)}", status_code=303)
 
 
 @app.get("/api/snapshot")

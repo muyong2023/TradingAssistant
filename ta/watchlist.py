@@ -55,6 +55,10 @@ def _locate(text: str, group: str) -> tuple[int, int, list[str]]:
     scope = rest[: next_group.start()] if next_group else rest
     sym = re.search(r"symbols:\s*\[", scope)
     if not sym:
+        if re.search(r"symbols:\s*$", scope, re.M):
+            raise WatchlistError(
+                f"{group} 组的 symbols 写成了多行列表，本工具只支持方括号写法。"
+                f"请改成 symbols: [AAA, BBB] 后重试")
         raise WatchlistError(f"{group} 组里找不到 symbols 列表")
 
     open_at = block.end() + sym.end()          # 左括号之后
@@ -68,6 +72,27 @@ def _locate(text: str, group: str) -> tuple[int, int, list[str]]:
 def _write(text: str, group: str, symbols: list[str], path: Path) -> None:
     open_at, close_at, _ = _locate(text, group)
     path.write_text(text[:open_at] + ", ".join(symbols) + text[close_at:])
+
+
+def validate(symbol: str) -> tuple[bool, str]:
+    """校验代码是否真实存在，返回（是否有效, 说明）。
+
+    行情接口对不存在的代码只是静默返回空数据，不报错 ——
+    APPL（苹果应为 AAPL）当初就是这样混进配置的。
+    网络不通时放行：宁可让人加进一个可疑代码，也不要因为断网卡住操作。
+    """
+    symbol = symbol.strip().upper()
+    try:
+        from ta.data.alpaca import AlpacaProvider
+        asset = AlpacaProvider().get_asset(symbol)
+    except Exception:
+        return True, "（未能校验，已放行）"
+    if asset is None:
+        return False, f"{symbol} 在交易所资产库里查不到，请检查代码"
+    name = asset.get("name", "")
+    if not asset.get("tradable", True):
+        return True, f"{name}（注意：当前不可交易）"
+    return True, name
 
 
 def add(symbol: str, group: str, path: Path | None = None) -> str:

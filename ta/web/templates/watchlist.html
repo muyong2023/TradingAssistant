@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}自选股 · 交易小助手{% endblock %}
+{% block content %}
+
+<section class="detail-head">
+  <div><h1>自选股</h1>
+    <p class="sub">改动立即写入 <code>config/config.yaml</code>，下次检查自动生效，无需重启。</p>
+  </div>
+  <a class="back" href="/">← 看板</a>
+</section>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash bad">{{ err }}</div>{% endif %}
+
+<section class="card">
+  <h2>添加</h2>
+  <form class="add-form" method="post" action="/watchlist/add">
+    <input name="symbol" placeholder="代码，如 ORCL" required autocomplete="off"
+           autocapitalize="characters" spellcheck="false" maxlength="10">
+    <select name="group">
+      {% for key, label in labels.items() %}
+      <option value="{{ key }}">{{ label }}（{{ key }}）</option>
+      {% endfor %}
+    </select>
+    <button type="submit">加入</button>
+  </form>
+  <p class="hint">提交前会到交易所资产库核对代码是否存在，写错会被拦下。</p>
+</section>
+
+{% for key, symbols in groups.items() %}
+<section class="card">
+  <h2>{{ labels[key] }}
+    <span class="h2-note">{{ key }} · {{ symbols|length }} 只 · 涨跌幅阈值 ±{{ alerts[key][0] }}% / ±{{ alerts[key][1] }}%</span>
+  </h2>
+  {% if symbols %}
+  <div class="chips">
+    {% for s in symbols %}
+    <span class="chip">
+      <a href="/s/{{ s }}">{{ s }}</a>
+      <form method="post" action="/watchlist/remove"
+            onsubmit="return confirm('把 {{ s }} 从自选股移除？')">
+        <input type="hidden" name="symbol" value="{{ s }}">
+        <button type="submit" title="移除 {{ s }}">×</button>
+      </form>
+    </span>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">（这一组是空的）</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

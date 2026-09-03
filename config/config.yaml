@@ -6,6 +6,7 @@ jobs:
   premarket: false      # 盘前简报，2026-09-03 关闭
   postclose: false      # 盘后复盘，2026-09-03 关闭
   intraday: true        # RSI 告警——当前的核心功能
+  web: true             # 本地看板 http://127.0.0.1:8787
 
 market:
   timezone: America/New_York

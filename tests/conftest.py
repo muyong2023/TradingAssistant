@@ -10,28 +10,28 @@
 """
 from __future__ import annotations
 
-import copy
+import re
 
 import pytest
-import yaml
 
 from ta import config as C
 
 
 @pytest.fixture(autouse=True)
 def isolated_config(tmp_path, monkeypatch):
-    data = copy.deepcopy(yaml.safe_load(C.CONFIG_PATH.read_text()))
-    #  测试跑在"功能全开"的配置上，与生产开关解耦
-    data.setdefault("chat", {})["enabled"] = True
-    data.setdefault("alerts", {})["pct_move_alert"] = True
-    data["alerts"]["rsi_alert"] = True
-    data.setdefault("jobs", {}).update(
-        {"premarket": True, "postclose": True, "intraday": True})
-    data["indicators"].setdefault("intraday", {})["enabled"] = True
+    #  用正则逐个改开关，而不是 yaml 读出再 dump 回去。
+    #  safe_dump 会把 `symbols: [NVDA, MSFT]` 重排成块状列表，
+    #  而 ta/watchlist.py 的定点编辑器只认方括号形式——曾因此让
+    #  网页端的增删测试"假通过"（错误重定向与成功同为 303）。
+    text = C.CONFIG_PATH.read_text()
+    for key in ("enabled", "pct_move_alert", "rsi_alert",
+                "premarket", "postclose", "intraday"):
+        text = re.sub(rf"^(\s+{key}:\s*)false\b", r"\1true", text, flags=re.M | re.I)
 
     path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
+    path.write_text(text)
     monkeypatch.setattr(C, "CONFIG_PATH", path)
+    monkeypatch.setattr("ta.watchlist.CONFIG_PATH", path)
     C.config.cache_clear()
-    yield data
+    yield path
     C.config.cache_clear()
