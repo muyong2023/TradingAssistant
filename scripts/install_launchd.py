@@ -198,7 +198,8 @@ def _wait_gone(label: str, timeout: float = 8.0) -> bool:
 def install() -> int:
     if not PYTHON.exists():
         sys.exit(f"找不到 {PYTHON} —— 先建好 venv")
-    paths = write(build())
+    plists = build()
+    paths = write(plists)
     failed = False
     for path in paths:
         label = path.stem
@@ -209,11 +210,21 @@ def install() -> int:
             #  偶发竞态：再等一轮重试一次
             _wait_gone(label)
             code, out = launchctl("bootstrap", domain(), str(path))
-        if code == 0:
-            print(f"  ✓ {label}")
-        else:
+        if code != 0:
             failed = True
             print(f"  ✗ {label}: {out}")
+            continue
+        job = label[len(PREFIX) + 1:]
+        if plists.get(job, {}).get("RunAtLoad"):
+            #  bootstrap 之后 RunAtLoad 的任务常停在
+            #  "pended nondemand spawn = speculative"：注册了但一直不启动，
+            #  runs=0、连日志文件都不生成。踢一脚才真的跑起来。
+            code, out = launchctl("kickstart", f"{domain()}/{label}")
+            if code != 0:
+                failed = True
+                print(f"  ✗ {label}: 已装上但启动失败：{out}")
+                continue
+        print(f"  ✓ {label}")
     return 1 if failed else 0
 
 
